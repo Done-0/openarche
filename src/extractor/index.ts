@@ -1,4 +1,5 @@
 import { readFile, writeFile, unlink } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { loadConfig } from '../config.js';
@@ -31,7 +32,10 @@ interface TempPayload {
 
 export function parseExtractionResult(raw: string): ExtractionCandidate[] {
   try {
-    const parsed = JSON.parse(raw.trim()) as unknown;
+    // Extract JSON array even if response has surrounding prose or markdown fences
+    const match = raw.match(/\[\s*\{[\s\S]*\]|\[\s*\]/);
+    const jsonStr = match ? match[0] : raw.trim();
+    const parsed = JSON.parse(jsonStr) as unknown;
     if (!Array.isArray(parsed) || parsed.length === 0) return [];
     return parsed as ExtractionCandidate[];
   } catch {
@@ -43,10 +47,46 @@ export function isValidCandidate(c: ExtractionCandidate, minQuality: number): bo
   return c.quality >= minQuality;
 }
 
+const MAX_TRANSCRIPT_CHARS = 40000;
+
 export async function callHaiku(transcript: string, config: AppConfig): Promise<string> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not set');
+  const apiKey = process.env.ANTHROPIC_AUTH_TOKEN ?? process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY is not set');
   const baseUrl = (process.env.ANTHROPIC_BASE_URL ?? 'https://api.anthropic.com').replace(/\/$/, '');
+  // Parse JSONL and extract readable conversation text
+  const readable: string[] = [];
+  for (const line of transcript.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line) as Record<string, unknown>;
+      if (entry.type === 'file-history-snapshot' || entry.type === 'summaries') continue;
+      const msg = entry.message as Record<string, unknown> | undefined;
+      if (!msg) continue;
+      const role = (msg.role as string) ?? '';
+      const content = msg.content;
+      if (!Array.isArray(content)) continue;
+      for (const block of content as Record<string, unknown>[]) {
+        if (block.type === 'text' && typeof block.text === 'string') {
+          readable.push(`${role}: ${block.text.slice(0, 2000)}`);
+        } else if (block.type === 'tool_use' && typeof block.name === 'string') {
+          readable.push(`${role} [tool: ${block.name}]`);
+        } else if (block.type === 'tool_result') {
+          const c = block.content;
+          const text = Array.isArray(c) ? (c as Record<string,unknown>[]).filter(x => x.type==='text').map(x => String(x.text ?? '')).join(' ').slice(0, 500) : '';
+          if (text) readable.push(`tool_result: ${text}`);
+        }
+      }
+    } catch { continue; }
+  }
+  const joined = readable.join('\n');
+  let truncated: string;
+  if (joined.length > MAX_TRANSCRIPT_CHARS) {
+    const mid = Math.floor(joined.length / 2);
+    const half = Math.floor(MAX_TRANSCRIPT_CHARS / 2);
+    truncated = joined.slice(Math.max(0, mid - half), mid + half);
+  } else {
+    truncated = joined;
+  }
   const resp = await fetch(`${baseUrl}/v1/messages`, {
     method: 'POST',
     headers: {
@@ -57,23 +97,41 @@ export async function callHaiku(transcript: string, config: AppConfig): Promise<
     body: JSON.stringify({
       model: config.extraction.model,
       max_tokens: 4096,
+      stream: false,
       system: EXTRACTION_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: `Extract from this transcript:\n\n${transcript}` }],
+      messages: [{ role: 'user', content: `Extract from this transcript:\n\n${truncated}` }],
     }),
   });
-  const json = await resp.json() as { content: [{ text: string }] };
-  return json.content[0].text;
-}
-
-async function markProcessed(processedPath: string, transcriptPath: string): Promise<void> {
-  let paths: string[] = [];
-  try {
-    paths = JSON.parse(await readFile(processedPath, 'utf8')) as string[];
-  } catch {}
-  if (!paths.includes(transcriptPath)) {
-    paths.push(transcriptPath);
-    await writeFile(processedPath, JSON.stringify(paths, null, 2), 'utf8');
+  // Always read via streaming to handle proxies that force SSE regardless of stream:false
+  const reader = resp.body?.getReader();
+  if (!reader) throw new Error('No response body');
+  const decoder = new TextDecoder();
+  let raw = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    raw += decoder.decode(value, { stream: true });
   }
+  raw += decoder.decode();
+  if (raw.startsWith('event:') || raw.startsWith('data:')) {
+    const chunks: string[] = [];
+    for (const line of raw.split(/\r?\n/)) {
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (data === '[DONE]') break;
+      try {
+        const evt = JSON.parse(data) as { type: string; delta?: { type: string; text: string } };
+        if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') chunks.push(evt.delta.text);
+      } catch { continue; }
+    }
+    if (chunks.length > 0) return chunks.join('');
+    throw new Error('SSE stream contained no text content');
+  }
+  const json = JSON.parse(raw) as { content?: [{ text: string }]; error?: { message: string } };
+  if (!resp.ok || !json.content?.[0]?.text) {
+    throw new Error(`API error: ${json.error?.message ?? raw.slice(0, 200)}`);
+  }
+  return json.content[0].text;
 }
 
 async function main(): Promise<void> {
@@ -90,7 +148,7 @@ async function main(): Promise<void> {
   const memoriesDir = join(baseDir, 'memories');
 
   const config = await loadConfig(configPath);
-  if (!process.env.ANTHROPIC_API_KEY) return;
+  if (!process.env.ANTHROPIC_AUTH_TOKEN && !process.env.ANTHROPIC_API_KEY) return;
 
   const raw = await callHaiku(transcript, config);
   const candidates = parseExtractionResult(raw);
@@ -132,7 +190,6 @@ async function main(): Promise<void> {
       );
       const lockPath = indexPath + '.lock';
       let waited = 0;
-      const { existsSync } = await import('node:fs');
       while (existsSync(lockPath) && waited < 3000) {
         await new Promise(r => setTimeout(r, 50));
         waited += 50;
@@ -153,7 +210,12 @@ async function main(): Promise<void> {
   state.totalMemories = (await loadIndex(indexPath)).memories.length;
   await saveState(statePath, state);
 
-  await markProcessed(processedPath, transcriptPath);
+  let processed: string[] = [];
+  try { processed = JSON.parse(await readFile(processedPath, 'utf8')) as string[]; } catch {}
+  if (!processed.includes(transcriptPath)) {
+    processed.push(transcriptPath);
+    await writeFile(processedPath, JSON.stringify(processed, null, 2), 'utf8');
+  }
 }
 
 if (!process.argv[1]?.includes('.test.')) {

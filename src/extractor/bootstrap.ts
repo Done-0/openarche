@@ -117,7 +117,7 @@ export async function runBootstrap(
           extracted++;
         }
         await markProcessed(processedPath, transcriptPath);
-      } catch { /* skip failed transcripts */ }
+      } catch (err) { process.stderr.write(`[openarche] transcript error: ${String(err)}\n`); }
 
       current++;
       onProgress(current, total);
@@ -133,4 +133,16 @@ export async function runBootstrap(
   await saveState(statePath, finalState);
 
   return { processed: current, extracted };
+}
+
+async function main(): Promise<void> {
+  const baseDir = join(homedir(), '.claude', 'openarche');
+  const result = await runBootstrap(baseDir, (current, total) => {
+    process.stderr.write(`\rBootstrap progress: ${current}/${total}`);
+  });
+  process.stderr.write(`\nBootstrap complete: processed ${result.processed} transcripts, extracted ${result.extracted} memories.\n`);
+}
+
+if (!process.argv[1]?.includes('.test.')) {
+  main().catch(err => process.stderr.write(String(err) + '\n'));
 }
