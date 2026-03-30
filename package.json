@@ -1,0 +1,23 @@
+{
+  "name": "openarche",
+  "version": "0.1.0",
+  "description": "Local developer memory system for Claude Code",
+  "type": "module",
+  "main": "dist/hooks/prompt.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "node --test --import tsx/esm 'tests/**/*.test.ts'"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.15",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@xenova/transformers": "^2.17.0"
+  }
+}
