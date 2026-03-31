@@ -49,6 +49,7 @@ export interface AppState {
 }
 
 export interface StdinData {
+  prompt?: string;
   transcript_path?: string;
   cwd?: string;
   model?: { id?: string; display_name?: string };

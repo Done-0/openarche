@@ -18,8 +18,8 @@ export function vectorSearch(
   return index.memories
     .map(entry => ({ entry, similarity: cosineSimilarity(queryEmbedding, entry.embedding), via: 'vector' as const }))
     .filter(r => {
-      const isSameProject = cwd && r.entry.source_project && r.entry.source_project === cwd;
-      return r.similarity >= (isSameProject ? threshold : crossProjectThreshold);
+      const isOtherProject = cwd && r.entry.source_project && r.entry.source_project !== cwd;
+      return r.similarity >= (isOtherProject ? crossProjectThreshold : threshold);
     })
     .sort((a, b) => b.similarity - a.similarity)
     .slice(0, topK);

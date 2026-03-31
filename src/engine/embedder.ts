@@ -29,19 +29,23 @@ async function getLocalPipeline(modelName: string): Promise<(text: string) => Pr
 }
 
 async function embedRemote(text: string, config: AppConfig): Promise<number[]> {
-  if (config.embedding.remoteProvider === 'openai') {
-    const resp = await fetch('https://api.openai.com/v1/embeddings', {
+  const { remoteProvider, remoteApiKey, remoteModel } = config.embedding;
+  if (remoteProvider === 'openai' || remoteProvider === 'siliconflow') {
+    const baseUrl = remoteProvider === 'siliconflow'
+      ? 'https://api.siliconflow.cn/v1/embeddings'
+      : 'https://api.openai.com/v1/embeddings';
+    const resp = await fetch(baseUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.embedding.remoteApiKey}`,
+        'Authorization': `Bearer ${remoteApiKey}`,
       },
-      body: JSON.stringify({ input: text, model: config.embedding.remoteModel }),
+      body: JSON.stringify({ input: text, model: remoteModel }),
     });
     const json = await resp.json() as { data: [{ embedding: number[] }] };
     return json.data[0].embedding;
   }
-  throw new Error(`Unsupported remote provider: ${config.embedding.remoteProvider}`);
+  throw new Error(`Unsupported remote provider: ${remoteProvider}`);
 }
 
 export async function embed(text: string, config: AppConfig): Promise<number[]> {

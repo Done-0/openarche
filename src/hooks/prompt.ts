@@ -46,7 +46,7 @@ async function main(): Promise<void> {
   const stdin = JSON.parse(raw) as StdinData;
   if (!stdin.transcript_path) return;
 
-  const promptText = await getLastHumanMessage(stdin.transcript_path);
+  const promptText = stdin.prompt ?? await getLastHumanMessage(stdin.transcript_path);
   if (!promptText || promptText.length < 10) return;
 
   const config = await loadConfig(CONFIG_PATH);
