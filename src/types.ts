@@ -10,6 +10,7 @@ export interface ArcheEntry {
   source_project: string | null;
   trigger_context: string;
   quality: number;
+  quality_breakdown: { reusability: number; non_obviousness: number; clarity: number; completeness: number };
   created_at: number;
   last_accessed: number | null;
   /** float32 vector, length matches embedding model (384 for multilingual-e5-small, 1536 for text-embedding-3-small) */

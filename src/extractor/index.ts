@@ -19,7 +19,7 @@ export interface ExtractionCandidate {
   body: string;
   tags: string[];
   links_hint: string[];
-  quality: number;
+  quality_breakdown: { reusability: number; non_obviousness: number; clarity: number; completeness: number };
 }
 
 interface TempPayload {
@@ -44,7 +44,7 @@ export function parseExtractionResult(raw: string): ExtractionCandidate[] {
 }
 
 export function isValidCandidate(c: ExtractionCandidate, minQuality: number): boolean {
-  return c.quality >= minQuality;
+  return (c.quality_breakdown.reusability * 0.4 + c.quality_breakdown.non_obviousness * 0.3 + c.quality_breakdown.clarity * 0.2 + c.quality_breakdown.completeness * 0.1) >= minQuality;
 }
 
 const MAX_TRANSCRIPT_CHARS = 40000;
@@ -175,11 +175,12 @@ async function main(): Promise<void> {
       structure: c.structure,
       tags: c.tags,
       links: [],
-      score: c.quality,
+      score: (c.quality_breakdown.reusability * 0.4 + c.quality_breakdown.non_obviousness * 0.3 + c.quality_breakdown.clarity * 0.2 + c.quality_breakdown.completeness * 0.1),
       access_count: 0,
       source_project: cwd || null,
       trigger_context: c.trigger_context,
-      quality: c.quality,
+      quality: (c.quality_breakdown.reusability * 0.4 + c.quality_breakdown.non_obviousness * 0.3 + c.quality_breakdown.clarity * 0.2 + c.quality_breakdown.completeness * 0.1),
+      quality_breakdown: c.quality_breakdown,
       created_at: Date.now(),
       last_accessed: null,
       embedding: titleEmbedding,

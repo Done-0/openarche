@@ -29,11 +29,11 @@ For each insight, determine:
    - tree: sections ## Scenario, ## Decision Tree (ASCII art), ## Choice, ## Reconsider When
    - graph: sections ## When, ## Structure, ## Key Points, ## Related
 5. links_hint: list of concept phrases this experience relates to
-6. quality: 0.0-1.0
-   - 0.9+ clear, reusable, non-obvious insight
-   - 0.7-0.9 probably useful
-   - 0.6-0.7 borderline
-   - < 0.6 do not store
+6. quality_breakdown: score each dimension independently from 0.0 to 1.0
+   - reusability: how broadly applicable across projects/contexts (0=project-specific, 1=universal)
+   - non_obviousness: how much this requires real experience vs reading docs (0=obvious from docs, 1=only learned by doing)
+   - clarity: how actionable and self-contained the insight is (0=vague/incomplete, 1=immediately usable)
+   - completeness: whether all necessary context is present (0=missing critical info, 1=fully self-contained)
 
 Return JSON array only. Return [] if nothing worth storing.
 
@@ -46,6 +46,11 @@ Return JSON array only. Return [] if nothing worth storing.
     "body": "full markdown body",
     "tags": ["technology", "keywords"],
     "links_hint": ["related concept phrase"],
-    "quality": 0.0
+    "quality_breakdown": {
+      "reusability": 0.0,
+      "non_obviousness": 0.0,
+      "clarity": 0.0,
+      "completeness": 0.0
+    }
   }
 ]`;
