@@ -54,7 +54,7 @@ async function main(): Promise<void> {
   if (index.memories.length === 0) return;
 
   const queryEmbedding = await embed(promptText, config);
-  const results = retrieve(index, queryEmbedding, config.retrieval.threshold, config.retrieval.topK);
+  const results = retrieve(index, queryEmbedding, config.retrieval.threshold, config.retrieval.topK, stdin.cwd);
   if (results.length === 0) return;
 
   const bodyMap = new Map<string, string>();
@@ -76,7 +76,7 @@ async function main(): Promise<void> {
   process.stdout.write(xml);
 
   const state = await loadState(STATE_PATH);
-  state.lastMatch = { count: filtered.length, at: Date.now() };
+  state.lastMatch = { count: filtered.length, at: Date.now(), titles: filtered.map(r => r.entry.title) };
   await saveState(STATE_PATH, state);
 
   const now = Date.now();

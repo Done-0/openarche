@@ -6,7 +6,7 @@ import { loadConfig } from '../config.js';
 import { loadState, saveState } from '../state.js';
 import { loadIndex, saveIndex } from '../engine/index-store.js';
 import { embed, cosineSimilarity } from '../engine/embedder.js';
-import { writeMemory } from '../engine/writer.js';
+import { writeMemory, upsertMemory } from '../engine/writer.js';
 import { buildLinks, matchLinksHints } from '../engine/graph.js';
 import { EXTRACTION_SYSTEM_PROMPT } from './prompt.js';
 import type { ArcheEntry, AppConfig } from '../types.js';
@@ -159,10 +159,13 @@ async function main(): Promise<void> {
     const titleEmbedding = await embed(`${c.title} ${c.trigger_context}`, config);
 
     const currentIndex = await loadIndex(indexPath);
-    const isDuplicate = currentIndex.memories.some(e =>
-      cosineSimilarity(titleEmbedding, e.embedding) >= 0.95
-    );
-    if (isDuplicate) continue;
+    let similar: ArcheEntry | undefined;
+    let bestSim = 0;
+    for (const e of currentIndex.memories) {
+      const sim = cosineSimilarity(titleEmbedding, e.embedding);
+      if (sim > bestSim) { bestSim = sim; similar = e; }
+    }
+    if (bestSim >= 0.95) continue; // near-exact duplicate, skip
 
     const id = randomBytes(4).toString('hex');
     const entry: ArcheEntry = {
@@ -182,7 +185,11 @@ async function main(): Promise<void> {
       embedding: titleEmbedding,
     };
 
-    await writeMemory({ memoriesDir, indexPath, entry, body: c.body });
+    if (bestSim >= 0.85 && similar) {
+      await upsertMemory({ memoriesDir, indexPath, existingId: similar.id, entry, body: c.body });
+    } else {
+      await writeMemory({ memoriesDir, indexPath, entry, body: c.body });
+    }
 
     if (c.links_hint.length > 0) {
       const hintEmbeddings = await Promise.all(

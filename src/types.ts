@@ -43,7 +43,7 @@ export interface AppConfig {
 
 export interface AppState {
   totalMemories: number;
-  lastMatch: { count: number; at: number } | null;
+  lastMatch: { count: number; at: number; titles: string[] } | null;
   bootstrapping: { current: number; total: number };
 }
 

@@ -11,11 +11,16 @@ export function vectorSearch(
   index: ArcheIndex,
   queryEmbedding: number[],
   threshold: number,
-  topK: number
+  topK: number,
+  cwd?: string
 ): SearchResult[] {
+  const crossProjectThreshold = Math.min(threshold + 0.08, 0.95);
   return index.memories
     .map(entry => ({ entry, similarity: cosineSimilarity(queryEmbedding, entry.embedding), via: 'vector' as const }))
-    .filter(r => r.similarity >= threshold)
+    .filter(r => {
+      const isSameProject = cwd && r.entry.source_project && r.entry.source_project === cwd;
+      return r.similarity >= (isSameProject ? threshold : crossProjectThreshold);
+    })
     .sort((a, b) => b.similarity - a.similarity)
     .slice(0, topK);
 }
@@ -46,9 +51,10 @@ export function retrieve(
   index: ArcheIndex,
   queryEmbedding: number[],
   threshold: number,
-  topK: number
+  topK: number,
+  cwd?: string
 ): SearchResult[] {
-  const seeds = vectorSearch(index, queryEmbedding, threshold, topK);
+  const seeds = vectorSearch(index, queryEmbedding, threshold, topK, cwd);
   const neighbors = bfsExpand(seeds, index);
   return [...seeds, ...neighbors];
 }

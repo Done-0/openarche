@@ -1,6 +1,6 @@
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { appendMemory } from './index-store.js';
+import { appendMemory, updateMemory } from './index-store.js';
 import type { ArcheEntry } from '../types.js';
 
 interface WriteMemoryOptions {
@@ -27,6 +27,21 @@ function toFrontmatter(entry: ArcheEntry): string {
     '---',
     '',
   ].join('\n');
+}
+
+interface UpsertMemoryOptions {
+  memoriesDir: string;
+  indexPath: string;
+  existingId: string;
+  entry: ArcheEntry;
+  body: string;
+}
+
+export async function upsertMemory(opts: UpsertMemoryOptions): Promise<void> {
+  const { memoriesDir, indexPath, existingId, entry, body } = opts;
+  const content = toFrontmatter(entry) + body;
+  await writeFile(join(memoriesDir, `${existingId}.md`), content, 'utf8');
+  await updateMemory(indexPath, existingId, { ...entry, id: existingId });
 }
 
 export async function writeMemory(opts: WriteMemoryOptions): Promise<void> {

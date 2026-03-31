@@ -11,6 +11,9 @@ import { buildLinks, matchLinksHints } from '../engine/graph.js';
 import { callHaiku, parseExtractionResult, isValidCandidate } from './index.js';
 import type { ArcheEntry } from '../types.js';
 
+const MIN_USER_TURNS = 5;
+const SILENCE_MS = 12 * 60 * 60 * 1000;
+
 export async function findUnprocessedTranscripts(
   projectsDir: string,
   processed: Set<string>
@@ -28,8 +31,17 @@ export async function findUnprocessedTranscripts(
           if (!file.name.endsWith('.jsonl')) continue;
           const filePath = join(projectPath, file.name);
           if (processed.has(filePath)) continue;
-          const s = await stat(filePath);
-          results.push({ path: filePath, mtime: s.mtimeMs });
+          const s = await stat(filePath).catch(() => null);
+          if (!s || Date.now() - s.mtimeMs < SILENCE_MS) continue;
+          try {
+            const content = await readFile(filePath, 'utf8');
+            if (!content.includes('"tool_use"')) continue;
+            const userTurns = content.split('\n').filter(l => {
+              try { return (JSON.parse(l) as { message?: { role?: string } }).message?.role === 'user'; } catch { return false; }
+            }).length;
+            if (userTurns < MIN_USER_TURNS) continue;
+            results.push({ path: filePath, mtime: s.mtimeMs });
+          } catch { continue; }
         }
       } catch { continue; }
     }

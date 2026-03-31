@@ -71,8 +71,8 @@ Config file: `<home>/.claude/openarche/config.json`
     "remoteApiKey": ""
   },
   "retrieval": {
-    "threshold": 0.72,
-    "topK": 5,
+    "threshold": 0.80,
+    "topK": 3,
     "maxInjectChars": 3000
   },
   "extraction": {
@@ -90,8 +90,8 @@ Config file: `<home>/.claude/openarche/config.json`
 | `embedding.remoteProvider` | `""` | Remote embedding provider (e.g. `openai`) |
 | `embedding.remoteModel` | `""` | Remote embedding model (e.g. `text-embedding-3-small`) |
 | `embedding.remoteApiKey` | `""` | API key for OpenAI embedding (required when using remote) |
-| `retrieval.threshold` | `0.72` | Cosine similarity cutoff. Higher = fewer but more relevant results |
-| `retrieval.topK` | `5` | Max seed memories injected per prompt |
+| `retrieval.threshold` | `0.80` | Cosine similarity cutoff. Higher = fewer but more relevant results |
+| `retrieval.topK` | `3` | Max seed memories injected per prompt |
 | `retrieval.maxInjectChars` | `3000` | Max injected characters per prompt |
 | `extraction.model` | `claude-haiku-4-5-20251001` | Claude model used for extraction |
 | `extraction.minQualityScore` | `0.6` | Discard insights below this quality score |
@@ -139,7 +139,13 @@ hooks/prompt.ts
   ├─ vectorSearch()           # cosine sim > threshold, top-K
   ├─ bfsExpand()              # one-hop BFS over links
   ├─ read .md bodies, truncate to maxInjectChars
-  ├─ stdout → <arche_context> XML
+  ├─ stdout → <arche_context> XML injected before user prompt:
+  │     <arche_context matched="N" total="M">
+  │       <memory id="..." type="..." score="..." age="Xd" project="..." via="vector">
+  │         memory body
+  │       </memory>
+  │       ...
+  │     </arche_context>
   └─ update state.json + score/access_count
 ```
 
@@ -147,17 +153,21 @@ hooks/prompt.ts
 
 ```
 hooks/stop.ts
-  ├─ pre-check: < 4 lines / no tool_use / already processed → skip
-  ├─ write payload to temp file
-  ├─ spawn detached extractor/index.ts <tmpFile>
+  ├─ scan all unprocessed .jsonl under ~/.claude/projects/
+  ├─ skip: already in processed.json
+  ├─ skip: file mtime < 12h (conversation still active)
+  ├─ skip: no tool_use / user turns < 5
+  ├─ write payload to temp file per qualifying transcript
+  ├─ spawn detached extractor/index.ts <tmpFile> per file
   └─ child.unref() → main process exits immediately
 
 [background process] extractor/index.ts
   ├─ callHaiku(transcript)    # Anthropic API
   ├─ filter quality < minQualityScore
   ├─ embed(title + trigger_context)
-  ├─ dedup: cosine > 0.95 → skip
-  ├─ writeMemory()            # write .md + appendMemory()
+  ├─ cosine >= 0.95 → skip (near-exact duplicate)
+  ├─ cosine >= 0.85 → upsertMemory()   # overwrite existing .md + updateMemory()
+  ├─ else → writeMemory()              # write .md + appendMemory()
   ├─ matchLinksHints() + buildLinks()  # bidirectional edges
   └─ update state.json(totalMemories)
 ```

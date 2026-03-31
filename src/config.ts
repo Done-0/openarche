@@ -10,8 +10,8 @@ export const DEFAULT_CONFIG: AppConfig = {
     remoteApiKey: '',
   },
   retrieval: {
-    threshold: 0.72,
-    topK: 5,
+    threshold: 0.80,
+    topK: 3,
     maxInjectChars: 3000,
   },
   extraction: {
