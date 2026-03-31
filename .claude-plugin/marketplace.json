@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "openarche",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Persistent local memory for Claude Code — auto-extracts insights from your conversations and injects them as context, across all projects",
   "owner": {
     "name": "Done-0"
@@ -10,7 +10,7 @@
     {
       "name": "openarche",
       "description": "Persistent local memory for Claude Code — auto-extracts insights from your conversations and injects them as context, across all projects",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "author": {
         "name": "Done-0"
       },

@@ -1,10 +1,16 @@
 {
   "name": "openarche",
   "description": "Persistent local memory for Claude Code — auto-extracts insights from your conversations and injects them as context, across all projects",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "author": {
     "name": "Done-0"
   },
   "license": "MIT",
-  "keywords": ["memory", "rag", "experience", "claude-code", "developer-tools"]
+  "keywords": [
+    "memory",
+    "rag",
+    "experience",
+    "claude-code",
+    "developer-tools"
+  ]
 }
