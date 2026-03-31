@@ -48,6 +48,7 @@ Setup handles all configuration automatically and optionally bootstraps from you
 | Command | Description |
 |---------|-------------|
 | `/openarche:setup` | Initialize plugin, batch-extract memories from all conversation history |
+| `/openarche:extract` | Manually trigger extraction from qualifying conversation history |
 | `/openarche:config` | View or update configuration |
 | `/openarche:save` | Manually save an insight from the current conversation |
 | `/openarche:list` | List recently stored memories |
