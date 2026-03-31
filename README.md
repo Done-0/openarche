@@ -33,6 +33,12 @@ OpenArche fixes all three by silently building a local knowledge base from your 
 /plugin install openarche
 ```
 
+Then reload the plugin:
+
+```
+/reload-plugin
+```
+
 **3. Run setup:**
 
 ```
@@ -42,6 +48,15 @@ OpenArche fixes all three by silently building a local knowledge base from your 
 Setup handles all configuration automatically and optionally bootstraps from your conversation history. Downloads the local embedding model (~120MB) on first run — one time only.
 
 **4. Done.** OpenArche runs fully automatically in the background.
+
+## Updating
+
+To update OpenArche to the latest version:
+
+```
+/plugin update openarche
+/reload-plugin
+```
 
 ## Commands
 
