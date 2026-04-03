@@ -27,25 +27,20 @@ const INDEX_PATH = process.argv[2];
 const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
 const index = JSON.parse(fs.readFileSync(INDEX_PATH, 'utf8'));
 
-const { provider, remoteProvider, remoteModel, remoteApiKey } = config.embedding;
+const { provider, remoteModel, remoteApiKey, remoteBaseUrl } = config.embedding;
 
-if (provider !== 'openai') {
-  console.error('Error: Only remote embedding providers are supported');
+if (provider !== 'remote') {
+  console.error('Error: Only remote embedding providers are supported for reindexing');
   console.error('Current provider:', provider);
   process.exit(1);
 }
 
-let apiUrl, headers;
-if (remoteProvider === 'siliconflow') {
-  apiUrl = 'https://api.siliconflow.cn/v1/embeddings';
-  headers = { 'Authorization': 'Bearer ' + remoteApiKey, 'Content-Type': 'application/json' };
-} else if (remoteProvider === 'openai') {
-  apiUrl = 'https://api.openai.com/v1/embeddings';
-  headers = { 'Authorization': 'Bearer ' + remoteApiKey, 'Content-Type': 'application/json' };
-} else {
-  console.error('Error: Unsupported provider:', remoteProvider);
+if (!remoteBaseUrl || !remoteModel || !remoteApiKey) {
+  console.error('Error: remoteBaseUrl, remoteModel, and remoteApiKey are required');
   process.exit(1);
 }
+
+const apiUrl = remoteBaseUrl.replace(/\/$/, '') + '/embeddings';
 
 async function embed(text) {
   const url = new URL(apiUrl);
@@ -56,7 +51,11 @@ async function embed(text) {
       port: url.port || 443,
       path: url.pathname,
       method: 'POST',
-      headers: { ...headers, 'Content-Length': Buffer.byteLength(postData) }
+      headers: {
+        'Authorization': 'Bearer ' + remoteApiKey,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      }
     }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
@@ -66,7 +65,12 @@ async function embed(text) {
           return;
         }
         try {
-          resolve(JSON.parse(data).data[0].embedding);
+          const json = JSON.parse(data);
+          if (!json.data || !json.data[0] || !json.data[0].embedding) {
+            reject(new Error('Invalid API response'));
+            return;
+          }
+          resolve(json.data[0].embedding);
         } catch (e) {
           reject(e);
         }
@@ -81,7 +85,7 @@ async function embed(text) {
 (async () => {
   const memories = index.memories;
   const total = memories.length;
-  console.log('Reindexing ' + total + ' memories with ' + remoteProvider + '/' + remoteModel + '...');
+  console.log('Reindexing ' + total + ' memories with ' + remoteModel + '...');
 
   const BATCH_SIZE = 10;
   for (let i = 0; i < total; i += BATCH_SIZE) {
@@ -116,4 +120,4 @@ The script:
 - Shows progress every 10 memories
 - Preserves all metadata (links, scores, access counts)
 - Uses atomic writes to prevent data corruption
-- Supports SiliconFlow and OpenAI embedding providers
+- Supports all OpenAI-compatible embedding APIs via remoteBaseUrl

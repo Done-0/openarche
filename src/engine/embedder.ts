@@ -29,23 +29,37 @@ async function getLocalPipeline(modelName: string): Promise<(text: string) => Pr
 }
 
 async function embedRemote(text: string, config: AppConfig): Promise<number[]> {
-  const { remoteProvider, remoteApiKey, remoteModel } = config.embedding;
-  if (remoteProvider === 'openai' || remoteProvider === 'siliconflow') {
-    const baseUrl = remoteProvider === 'siliconflow'
-      ? 'https://api.siliconflow.cn/v1/embeddings'
-      : 'https://api.openai.com/v1/embeddings';
-    const resp = await fetch(baseUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${remoteApiKey}`,
-      },
-      body: JSON.stringify({ input: text, model: remoteModel }),
-    });
-    const json = await resp.json() as { data: [{ embedding: number[] }] };
-    return json.data[0].embedding;
+  const { remoteApiKey, remoteModel, remoteBaseUrl } = config.embedding;
+  if (!remoteBaseUrl) throw new Error('remoteBaseUrl is required for remote embedding');
+  if (!remoteModel) throw new Error('remoteModel is required for remote embedding');
+  if (!remoteApiKey) throw new Error('remoteApiKey is required for remote embedding');
+
+  const baseUrl = remoteBaseUrl.replace(/\/$/, '');
+  const resp = await fetch(`${baseUrl}/embeddings`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${remoteApiKey}`,
+    },
+    body: JSON.stringify({ input: text, model: remoteModel }),
+  });
+
+  if (!resp.ok) {
+    const errorText = await resp.text();
+    throw new Error(`Embedding API error: ${resp.status} ${resp.statusText} - ${errorText}`);
   }
-  throw new Error(`Unsupported remote provider: ${remoteProvider}`);
+
+  const json = await resp.json() as { data?: Array<{ embedding?: number[] }>; error?: { message: string } };
+
+  if (json.error) {
+    throw new Error(`Embedding API error: ${json.error.message}`);
+  }
+
+  if (!json.data || json.data.length === 0 || !json.data[0].embedding) {
+    throw new Error('Embedding API returned invalid response');
+  }
+
+  return json.data[0].embedding;
 }
 
 export async function embed(text: string, config: AppConfig): Promise<number[]> {

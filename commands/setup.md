@@ -92,7 +92,7 @@ const defaults={
   'index.json': JSON.stringify({version:1,memories:[]},null,2),
   'processed.json': JSON.stringify([],null,2),
   'state.json': JSON.stringify({totalMemories:0,lastMatch:null,bootstrapping:{current:0,total:0}},null,2),
-  'config.json': JSON.stringify({embedding:{provider:'local',localModel:'Xenova/multilingual-e5-small',remoteProvider:'',remoteModel:'',remoteApiKey:''},retrieval:{threshold:0.80,topK:3,maxInjectChars:3000},extraction:{model:'claude-haiku-4-5-20251001',minQualityScore:0.6,bootstrapConcurrency:3}},null,2)
+  'config.json': JSON.stringify({embedding:{provider:'local',localModel:'Xenova/multilingual-e5-small',remoteModel:'',remoteApiKey:'',remoteBaseUrl:''},retrieval:{threshold:0.73,topK:3,maxInjectChars:3000,reranking:{enabled:false,provider:'local',remoteModel:'',remoteApiKey:'',remoteBaseUrl:'',weights:{similarity:0.7,quality:0.2,recency:0.05,frequency:0.05}}},extraction:{model:'claude-haiku-4-5-20251001',minQualityScore:0.6,bootstrapConcurrency:3}},null,2)
 };
 for(const[name,content]of Object.entries(defaults)){
   const p=path.join(base,name);

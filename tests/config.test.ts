@@ -14,9 +14,9 @@ test('loadConfig merges partial embedding config', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'oe-cfg-'));
   try {
     const configPath = join(dir, 'config.json');
-    await writeFile(configPath, JSON.stringify({ embedding: { provider: 'openai' } }), 'utf8');
+    await writeFile(configPath, JSON.stringify({ embedding: { provider: 'remote' } }), 'utf8');
     const config = await loadConfig(configPath);
-    assert.equal(config.embedding.provider, 'openai');
+    assert.equal(config.embedding.provider, 'remote');
     assert.equal(config.embedding.localModel, DEFAULT_CONFIG.embedding.localModel);
   } finally {
     await rm(dir, { recursive: true });

@@ -16,6 +16,7 @@ OpenArche fixes all three by silently building a local knowledge base from your 
 
 - **Auto-extract** — after each conversation, extracts reusable insights via Claude Haiku and stores them as local Markdown files
 - **Auto-inject** — before each prompt, vector-searches relevant memories and injects them as hidden context for Claude (invisible to you, visible to Claude)
+- **Smart reranking** — supports local weighted reranking (similarity+quality+recency+frequency) or remote rerank API
 - **Knowledge graph** — memories link to each other bidirectionally; retrieval expands through BFS graph traversal for richer context
 - **StatusLine** — real-time memory count and last match in the Claude Code status bar
 
@@ -82,14 +83,27 @@ Config file: `<home>/.claude/openarche/config.json`
   "embedding": {
     "provider": "local",
     "localModel": "Xenova/multilingual-e5-small",
-    "remoteProvider": "",
     "remoteModel": "",
-    "remoteApiKey": ""
+    "remoteApiKey": "",
+    "remoteBaseUrl": ""
   },
   "retrieval": {
-    "threshold": 0.80,
+    "threshold": 0.73,
     "topK": 3,
-    "maxInjectChars": 3000
+    "maxInjectChars": 3000,
+    "reranking": {
+      "enabled": false,
+      "provider": "local",
+      "remoteModel": "",
+      "remoteApiKey": "",
+      "remoteBaseUrl": "",
+      "weights": {
+        "similarity": 0.7,
+        "quality": 0.2,
+        "recency": 0.05,
+        "frequency": 0.05
+      }
+    }
   },
   "extraction": {
     "model": "claude-haiku-4-5-20251001",
@@ -101,14 +115,20 @@ Config file: `<home>/.claude/openarche/config.json`
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `embedding.provider` | `local` | `local` or `openai`. After switching, run `/openarche:reindex` |
+| `embedding.provider` | `local` | `local` (local) or `remote` (remote). After switching, run `/openarche:reindex` |
 | `embedding.localModel` | `Xenova/multilingual-e5-small` | Local embedding model, 100+ languages, ~120MB |
-| `embedding.remoteProvider` | `""` | Remote embedding provider (e.g. `openai`) |
-| `embedding.remoteModel` | `""` | Remote embedding model (e.g. `text-embedding-3-small`) |
-| `embedding.remoteApiKey` | `""` | API key for OpenAI embedding (required when using remote) |
-| `retrieval.threshold` | `0.80` | Cosine similarity cutoff. Higher = fewer but more relevant results |
+| `embedding.remoteModel` | `""` | Remote embedding model (e.g. `text-embedding-3-small`, `BAAI/bge-m3`) |
+| `embedding.remoteApiKey` | `""` | Remote embedding API key |
+| `embedding.remoteBaseUrl` | `""` | Remote API base URL (supports all OpenAI-compatible APIs like SiliconFlow, DeepSeek) |
+| `retrieval.threshold` | `0.73` | Cosine similarity cutoff. Higher = fewer but more relevant results |
 | `retrieval.topK` | `3` | Max seed memories injected per prompt |
 | `retrieval.maxInjectChars` | `3000` | Max injected characters per prompt |
+| `retrieval.reranking.enabled` | `false` | Enable reranking |
+| `retrieval.reranking.provider` | `local` | `local` (weighted local) or `remote` (remote rerank API) |
+| `retrieval.reranking.remoteModel` | `""` | Remote rerank model (e.g. `BAAI/bge-reranker-v2-m3`) |
+| `retrieval.reranking.remoteApiKey` | `""` | Remote rerank API key |
+| `retrieval.reranking.remoteBaseUrl` | `""` | Remote rerank API base URL |
+| `retrieval.reranking.weights.*` | See config | Local reranking weights (similarity: 0.7, quality: 0.2, recency: 0.05, frequency: 0.05) |
 | `extraction.model` | `claude-haiku-4-5-20251001` | Claude model used for extraction |
 | `extraction.minQualityScore` | `0.6` | Discard insights below this quality score |
 | `extraction.bootstrapConcurrency` | `3` | Parallel transcripts during bootstrap |

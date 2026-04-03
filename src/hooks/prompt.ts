@@ -54,7 +54,7 @@ async function main(): Promise<void> {
   if (index.memories.length === 0) return;
 
   const queryEmbedding = await embed(promptText, config);
-  const results = retrieve(index, queryEmbedding, config.retrieval.threshold, config.retrieval.topK, stdin.cwd);
+  const results = await Promise.resolve(retrieve(index, queryEmbedding, config.retrieval.threshold, config.retrieval.topK, stdin.cwd, config.retrieval.reranking, promptText));
   if (results.length === 0) return;
 
   const bodyMap = new Map<string, string>();

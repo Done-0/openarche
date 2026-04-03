@@ -15,7 +15,7 @@ function makeCandidate(overrides: Partial<ExtractionCandidate> = {}): Extraction
     body: 'Always use .js extension in imports even for .ts files.',
     tags: ['esm', 'typescript'],
     links_hint: ['module resolution'],
-    quality: 0.85,
+    quality_breakdown: { reusability: 0.85, non_obviousness: 0.85, clarity: 0.85, completeness: 0.85 },
     ...overrides,
   };
 }
@@ -25,11 +25,11 @@ test('parseExtractionResult returns candidates from valid JSON array', () => {
   const result = parseExtractionResult(raw);
   assert.equal(result.length, 1);
   assert.equal(result[0].title, 'ESM requires .js extensions');
-  assert.equal(result[0].quality, 0.85);
+  assert.equal(result[0].quality_breakdown.reusability, 0.85);
 });
 
 test('parseExtractionResult returns multiple candidates', () => {
-  const raw = JSON.stringify([makeCandidate(), makeCandidate({ title: 'second', quality: 0.7 })]);
+  const raw = JSON.stringify([makeCandidate(), makeCandidate({ title: 'second', quality_breakdown: { reusability: 0.7, non_obviousness: 0.7, clarity: 0.7, completeness: 0.7 } })]);
   const result = parseExtractionResult(raw);
   assert.equal(result.length, 2);
   assert.equal(result[1].title, 'second');
@@ -57,19 +57,19 @@ test('parseExtractionResult handles JSON wrapped in markdown code block', () => 
 });
 
 test('isValidCandidate accepts quality at threshold', () => {
-  assert.equal(isValidCandidate(makeCandidate({ quality: 0.6 }), 0.6), true);
+  assert.equal(isValidCandidate(makeCandidate({ quality_breakdown: { reusability: 0.6, non_obviousness: 0.6, clarity: 0.6, completeness: 0.6 } }), 0.6), true);
 });
 
 test('isValidCandidate accepts quality above threshold', () => {
-  assert.equal(isValidCandidate(makeCandidate({ quality: 0.9 }), 0.6), true);
+  assert.equal(isValidCandidate(makeCandidate({ quality_breakdown: { reusability: 0.9, non_obviousness: 0.9, clarity: 0.9, completeness: 0.9 } }), 0.6), true);
 });
 
 test('isValidCandidate rejects quality below threshold', () => {
-  assert.equal(isValidCandidate(makeCandidate({ quality: 0.59 }), 0.6), false);
+  assert.equal(isValidCandidate(makeCandidate({ quality_breakdown: { reusability: 0.59, non_obviousness: 0.59, clarity: 0.59, completeness: 0.59 } }), 0.6), false);
 });
 
 test('isValidCandidate rejects zero quality', () => {
-  assert.equal(isValidCandidate(makeCandidate({ quality: 0 }), 0.6), false);
+  assert.equal(isValidCandidate(makeCandidate({ quality_breakdown: { reusability: 0, non_obviousness: 0, clarity: 0, completeness: 0 } }), 0.6), false);
 });
 
 test('markProcessed writes path to processed.json', async () => {

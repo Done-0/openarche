@@ -24,16 +24,29 @@ export interface ArcheIndex {
 
 export interface AppConfig {
   embedding: {
-    provider: 'local' | 'openai' | 'voyage';
+    provider: 'local' | 'remote';
     localModel: string;
-    remoteProvider?: string;
     remoteModel?: string;
     remoteApiKey?: string;
+    remoteBaseUrl?: string;
   };
   retrieval: {
     threshold: number;
     topK: number;
     maxInjectChars: number;
+    reranking?: {
+      enabled: boolean;
+      provider?: 'local' | 'remote';
+      remoteModel?: string;
+      remoteApiKey?: string;
+      remoteBaseUrl?: string;
+      weights: {
+        similarity: number;
+        quality: number;
+        recency: number;
+        frequency: number;
+      };
+    };
   };
   extraction: {
     model: string;
