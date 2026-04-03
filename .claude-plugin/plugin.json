@@ -1,7 +1,7 @@
 {
   "name": "openarche",
   "description": "Persistent local memory for Claude Code — auto-extracts insights from your conversations and injects them as context, across all projects",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "author": {
     "name": "Done-0"
   },
