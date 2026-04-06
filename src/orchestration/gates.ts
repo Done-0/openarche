@@ -1,0 +1,88 @@
+import { cosineSimilarity, embed } from '../knowledge/embedding.js';
+import { loadPrototypeSection } from '../knowledge/prototype-cache.js';
+import type { ProductConfig } from '../types.js';
+import type { HarnessComplexity, HarnessGate, HarnessStageName } from '../contracts.js';
+
+export function evaluateHarnessGate(promptText: string): HarnessGate {
+  const text = promptText.replace(/\s+/g, ' ').trim();
+  const reasons: string[] = [];
+  const denseLength = text.replace(/\s+/g, '').length;
+  const punctuationCount = Array.from(text.matchAll(/[^\p{L}\p{N}\s]/gu)).length;
+  const lineCount = promptText.split('\n').map(line => line.trim()).filter(Boolean).length;
+
+  if (denseLength >= 120) reasons.push('Prompt is long enough to indicate multi-step work.');
+  if (punctuationCount >= 2) reasons.push('Prompt contains chained actions or constraints.');
+  if (lineCount >= 3) reasons.push('Prompt is structured as a multi-part request.');
+  if (denseLength >= 220 && punctuationCount >= 3) reasons.push('Prompt is dense enough to justify full harness controls.');
+
+  let complexity: HarnessComplexity = 'light';
+  if (reasons.length >= 3) complexity = 'high';
+  else if (reasons.length >= 1) complexity = 'moderate';
+
+  const requiredStages: HarnessStageName[] =
+    complexity === 'light'
+      ? ['plan', 'execute']
+      : complexity === 'moderate'
+        ? ['plan', 'execute', 'validate', 'review']
+        : ['plan', 'execute', 'validate', 'observe', 'review', 'maintain'];
+
+  return {
+    required: complexity !== 'light',
+    complexity,
+    reasons,
+    requiredStages,
+  };
+}
+
+export async function evaluateHarnessGateWithEmbeddings(promptText: string, config: ProductConfig): Promise<HarnessGate> {
+  const gate = evaluateHarnessGate(promptText);
+  if (
+    gate.complexity === 'high'
+    || gate.complexity === 'light' && gate.reasons.length === 0
+  ) {
+    return gate;
+  }
+  try {
+    const prototypeCache = await loadPrototypeSection(config, 'gate', async () => ({
+      light: await Promise.all([
+        embed('rename a variable', config),
+        embed('fix a typo in one file', config),
+        embed('update one string literal', config),
+      ]),
+      moderate: await Promise.all([
+        embed('implement a feature with validation and review', config),
+        embed('refactor a module and verify behavior', config),
+        embed('change application logic and confirm acceptance criteria', config),
+      ]),
+      high: await Promise.all([
+        embed('perform a production-grade refactor with validation observability review and maintenance', config),
+        embed('restructure architecture and close all engineering stages end to end', config),
+        embed('deliver a system-wide change with harness controls and durable follow-up', config),
+      ]),
+    })) as Record<HarnessComplexity, number[][]>;
+    const promptEmbedding = await embed(promptText, config);
+    const scores = {
+      light: prototypeCache.light.reduce((best, candidate) => Math.max(best, cosineSimilarity(promptEmbedding, candidate)), -1),
+      moderate: prototypeCache.moderate.reduce((best, candidate) => Math.max(best, cosineSimilarity(promptEmbedding, candidate)), -1),
+      high: prototypeCache.high.reduce((best, candidate) => Math.max(best, cosineSimilarity(promptEmbedding, candidate)), -1),
+    };
+    const ranked = Object.entries(scores).sort((a, b) => b[1] - a[1]) as Array<[HarnessComplexity, number]>;
+    if (ranked[0][0] === gate.complexity || ranked[0][1] < 0.55) {
+      return gate;
+    }
+    const complexity = ranked[0][0];
+    return {
+      required: complexity !== 'light',
+      complexity,
+      reasons: [...gate.reasons, `Prompt embedding aligns most strongly with ${complexity} complexity examples.`],
+      requiredStages:
+        complexity === 'light'
+          ? ['plan', 'execute']
+          : complexity === 'moderate'
+            ? ['plan', 'execute', 'validate', 'review']
+            : ['plan', 'execute', 'validate', 'observe', 'review', 'maintain'],
+    };
+  } catch {
+    return gate;
+  }
+}
