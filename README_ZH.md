@@ -5,7 +5,7 @@ OpenArche 是一个面向 Claude Code 的 harness-first 工程插件，处理非
 ## 功能
 
 - `任务分级`：判断任务保持轻量还是进入 harness
-- `持续会话`：为非轻量任务在 `.openarche/` 下保留阶段状态
+- `持续会话`：只有真正进入执行后才会在 `.openarche/` 下落任务状态
 - `阶段门禁`：让验证、评审、维护持续保持显式状态
 - `上下文注入`：补充当前任务状态、接管理由和相关本地知识
 - `知识召回`：通过 embedding 和关联扩展复用本地工程知识
@@ -42,7 +42,7 @@ OpenArche 是一个面向 Claude Code 的 harness-first 工程插件，处理非
 ## 工作方式
 
 1. 像平时一样向 Claude Code 提任务。
-2. 轻量任务保持轻量；中高复杂度任务会自动建立任务会话。
+2. 轻量任务保持轻量；非轻量任务会先注入 harness 上下文，只有显式执行或真实工具执行开始后才会建立 `.openarche/` 任务会话。
 3. 系统会告诉 Claude Code 为什么这个任务被接管、还差哪些阶段、本地有哪些相关知识。
 4. 状态栏和会话状态会持续显示还没完成的环节，避免任务过早结束。
 5. 验证、评审、维护会一直保持打开状态，直到对应工件文件里记录了所需证据。
@@ -79,6 +79,7 @@ OpenArche 是一个面向 Claude Code 的 harness-first 工程插件，处理非
 - `knowledge.retrieval`：召回阈值、召回数量和注入预算
 - `knowledge.extraction`：提取模型和并发度
 - `execution`：隔离策略和基准分支
+  OpenArche 默认只记录隔离执行方案，不会自动在你的仓库里创建 git worktree 或切换分支。
 - `validation.browser`：浏览器证据要求
 - `observability`：日志、指标、链路要求
 - `review`：自审、本地智能体评审、云端智能体评审、修复轮次

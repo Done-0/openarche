@@ -15,7 +15,8 @@ Required behavior:
    - review loop
    - maintenance follow-up
 3. Keep the runbook aligned with current product behavior:
-   - execution must use the configured isolation strategy
+- execution must follow the configured isolation strategy
+- OpenArche may write the isolation plan and setup commands, but it does not automatically mutate the user's git workspace
    - validation must include acceptance checks and regression checks
    - observability is only required when it is enabled and relevant services exist
    - review must reflect enabled review paths and merge checks

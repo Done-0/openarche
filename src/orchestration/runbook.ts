@@ -63,7 +63,7 @@ export function createRunbook(
     {
       name: 'execute',
       goal: 'Apply the change inside an isolated execution session.',
-      automated: true,
+      automated: false,
       required: true,
       exitCriteria: ['The task session is isolated from the default workspace.'],
     },

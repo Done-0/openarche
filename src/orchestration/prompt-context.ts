@@ -52,7 +52,7 @@ export async function buildPromptContext(request: PromptContextRequest): Promise
   ).join('\n');
   const workflowXml = [
     '  <step capability="planning">Define the objective, acceptance criteria, and explicit execution steps before large changes.</step>',
-    '  <step capability="worktree">Use an isolated git worktree or branch session for task execution.</step>',
+    '  <step capability="worktree">Plan an isolated git worktree or branch session for task execution without mutating the default workspace automatically.</step>',
     '  <step capability="browser">Collect browser evidence when UI behavior or user journeys matter.</step>',
     '  <step capability="observability">Inspect logs, metrics, and traces when reliability or performance is part of the task.</step>',
     '  <step capability="review">Run self-review and repair loops before merge.</step>',

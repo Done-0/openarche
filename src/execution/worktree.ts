@@ -22,6 +22,6 @@ export function createWorktreeSessionSpec(
         ? `[ -d "${sessionPath}" ] || git worktree add "${sessionPath}" ${baseRef}`
         : `git rev-parse --verify ${taskId} >/dev/null 2>&1 && git switch ${taskId} || git switch -c ${taskId} ${baseRef}`,
     ],
-    automated: true,
+    automated: false,
   };
 }

@@ -23,7 +23,7 @@ export function createProductManifest(version: string): ProductManifest {
         name: 'worktree' satisfies CapabilityName,
         enabled: true,
         maturity: 'operational' satisfies CapabilityDescriptor['maturity'],
-        summary: 'Define isolated git worktree or branch sessions for each task.',
+        summary: 'Define isolated git worktree or branch plans for each task without mutating the default workspace automatically.',
         responsibilities: [
           'Isolate non-trivial work from the default workspace.',
           'Bind each harness session to a deterministic execution surface.',
@@ -31,7 +31,7 @@ export function createProductManifest(version: string): ProductManifest {
         ],
         requiredFor: ['moderate', 'high'],
         evidenceDriven: true,
-        automatedByDefault: true,
+        automatedByDefault: false,
       },
       browser: {
         name: 'browser' satisfies CapabilityName,

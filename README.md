@@ -5,7 +5,7 @@ OpenArche is a harness-first Claude Code plugin for non-trivial engineering work
 ## Features
 
 - `Task grading`: decides whether a task stays light or enters harness control
-- `Persistent sessions`: keeps non-light work in `.openarche/` with explicit stage state
+- `Persistent sessions`: materializes `.openarche/` task state when execution work actually starts
 - `Stage gates`: keeps validation, review, and maintenance open until they are actually closed
 - `Context injection`: adds current task state, gate reasons, and relevant local knowledge
 - `Knowledge recall`: retrieves local engineering knowledge through embeddings and link expansion
@@ -42,7 +42,7 @@ If you use local embeddings, the first successful run may need network access to
 ## How It Works
 
 1. Use Claude Code as usual.
-2. Light tasks stay lightweight. Moderate and high-complexity tasks open a harness session automatically.
+2. Light tasks stay lightweight. Non-light tasks receive harness context first, and `.openarche/` session artifacts are materialized only for explicit execution work or after real tool execution starts.
 3. OpenArche tells Claude Code why the task was gated, which stages are still open, and which local knowledge is relevant.
 4. The status line and session state keep showing what is still open, so the task does not quietly close too early.
 5. Validation, review, and maintenance stay open until the required evidence is recorded in the session artifacts.
@@ -79,6 +79,7 @@ Config file:
 - `knowledge.retrieval`: recall threshold, recall fanout, and injection budget
 - `knowledge.extraction`: extraction model and capture concurrency
 - `execution`: isolation strategy and base ref
+  OpenArche records the isolation plan by default. It does not automatically create git worktrees or switch branches in your repository.
 - `validation.browser`: required browser evidence
 - `observability`: logs, metrics, and traces requirements
 - `review`: self-review, local agent review, cloud agent review, repair loops
