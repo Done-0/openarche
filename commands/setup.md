@@ -1,9 +1,20 @@
 ---
-description: Initialize OpenArche memory plugin
+description: Initialize OpenArche for harness sessions and task closeout
 allowed-tools: Bash, Read, Edit, Write, AskUserQuestion
 ---
 
-## Step 0: Ghost install check
+Initialize OpenArche in a way a first-time user can understand.
+
+Keep the explanation short and practical:
+
+- what OpenArche will start doing automatically after setup
+- why complex tasks will be handled differently
+- whether the plugin is ready
+- what the user should do next
+
+Only mention Claude Code internal hook names when you are editing `settings.json` or showing exact config keys.
+
+## Step 0: Ghost Install Check
 
 ```bash
 node -e "
@@ -17,11 +28,11 @@ console.log('Cache:',hasCache?'YES':'NO','Registry:',hasReg?'YES':'NO');
 "
 ```
 
-- Cache=YES, Registry=NO → delete the cache directory, tell user to reinstall
-- Cache=NO, Registry=YES → read `installed_plugins.json`, remove the openarche entry, write it back
-- Otherwise → continue
+- Cache=YES, Registry=NO: delete the cache directory, then tell the user to reinstall
+- Cache=NO, Registry=YES: remove the `openarche` entry from `installed_plugins.json`
+- Otherwise: continue
 
-## Step 1: Detect runtime
+## Step 1: Detect Runtime
 
 ```bash
 node -e "console.log(process.execPath)"
@@ -29,9 +40,9 @@ node -e "console.log(process.execPath)"
 
 If node is not available, stop and tell the user to install Node.js (https://nodejs.org).
 
-Save the node executable path — you will need it in Step 3.
+Save the node executable path. You will use it in Step 4.
 
-## Step 2: Build plugin
+## Step 2: Build Plugin
 
 Find the plugin directory:
 
@@ -46,7 +57,7 @@ try{
 "
 ```
 
-Save this as PLUGIN_DIR. If NOT_FOUND, tell the user to run `/plugin install openarche` first.
+Save this as `PLUGIN_DIR`. If it returns `NOT_FOUND`, tell the user to run `/plugin install openarche` first.
 
 Check if `dist/` exists (replace `PLUGIN_DIR` with the actual path obtained above):
 
@@ -65,65 +76,89 @@ console.log('Build complete');
 "
 ```
 
-Then apply the sharp compatibility patch (replace `PLUGIN_DIR` with the actual path):
-
-```bash
-node -e "
-const fs=require('fs'),path=require('path');
-const sharpIndex=path.join('PLUGIN_DIR','node_modules','sharp','lib','index.js');
-if(!fs.existsSync(sharpIndex)){console.log('sharp not found, skipping');process.exit(0);}
-const src=fs.readFileSync(sharpIndex,'utf8');
-if(src.includes('degrade gracefully')){console.log('already patched');process.exit(0);}
-const patched=`// patched for graceful degradation\n'use strict';\ntry {\nconst Sharp = require('./constructor');\nrequire('./input')(Sharp);\nrequire('./resize')(Sharp);\nrequire('./composite')(Sharp);\nrequire('./operation')(Sharp);\nrequire('./colour')(Sharp);\nrequire('./channel')(Sharp);\nrequire('./output')(Sharp);\nrequire('./utility')(Sharp);\nmodule.exports = Sharp;\n} catch (e) {\n// Native binary unavailable — degrade gracefully\nconst stub = function Sharp() { return stub; };\nstub.format = () => ({});\nstub.versions = {};\nstub.interpolators = [];\nstub.counters = () => ({});\nmodule.exports = stub;\n}\n`;
-fs.writeFileSync(sharpIndex,patched,'utf8');
-console.log('sharp patched');
-"
-```
-
-## Step 3: Init data directory and pre-warm embedding model
+## Step 3: Initialize Data Directory
 
 ```bash
 node -e "
 const fs=require('fs'),path=require('path'),os=require('os');
 const base=path.join(os.homedir(),'.claude','openarche');
-fs.mkdirSync(path.join(base,'memories'),{recursive:true});
+fs.mkdirSync(path.join(base,'knowledge'),{recursive:true});
 fs.mkdirSync(path.join(base,'models'),{recursive:true});
 const defaults={
-  'index.json': JSON.stringify({version:1,memories:[]},null,2),
-  'processed.json': JSON.stringify([],null,2),
-  'state.json': JSON.stringify({totalMemories:0,lastMatch:null,bootstrapping:{current:0,total:0}},null,2),
-  'config.json': JSON.stringify({embedding:{provider:'local',localModel:'Xenova/multilingual-e5-small',remoteModel:'',remoteApiKey:'',remoteBaseUrl:''},retrieval:{threshold:0.73,topK:3,maxInjectChars:3000,reranking:{enabled:false,provider:'local',remoteModel:'',remoteApiKey:'',remoteBaseUrl:'',weights:{similarity:0.7,quality:0.2,recency:0.05,frequency:0.05}}},extraction:{model:'claude-haiku-4-5-20251001',minQualityScore:0.6,bootstrapConcurrency:3}},null,2)
+  'index.json': JSON.stringify({version:1,entries:[]},null,2),
+  'capture-log.json': JSON.stringify([],null,2),
+  'state.json': JSON.stringify({knowledgeCount:0,lastRecall:null,captureSync:{current:0,total:0},activeSession:null},null,2),
+  'config.json': JSON.stringify({
+    knowledge:{
+      embedding:{provider:'local',localModel:'Xenova/multilingual-e5-small'},
+      retrieval:{threshold:0.73,topK:3,maxInjectChars:4000},
+      extraction:{model:'claude-haiku-4-5-20251001',minQualityScore:0.6,captureConcurrency:3}
+    },
+    execution:{isolationStrategy:'git-worktree',baseRef:'main'},
+    validation:{browser:{enabled:true,captureDomSnapshot:true,captureScreenshot:true,captureNavigation:true}},
+    observability:{enabled:true,logs:true,metrics:true,traces:true},
+    review:{localSelfReview:true,localAgentReview:true,cloudAgentReview:true,repairLoops:3},
+    maintenance:{qualitySweep:true,driftSweep:true}
+  },null,2)
 };
-for(const[name,content]of Object.entries(defaults)){
-  const p=path.join(base,name);
-  if(!fs.existsSync(p))fs.writeFileSync(p,content,'utf8');
-}
-console.log('Data directory ready:',base);
+const {pathToFileURL}=require('url');
+const pluginDir='PLUGIN_DIR';
+Promise.all([
+  import(pathToFileURL(path.join(pluginDir,'dist','config.js')).href),
+  import(pathToFileURL(path.join(pluginDir,'dist','state.js')).href),
+  import(pathToFileURL(path.join(pluginDir,'dist','knowledge','index-store.js')).href),
+]).then(async ([configMod,stateMod,indexMod])=>{
+  for(const[name,content]of Object.entries(defaults)){
+    const p=path.join(base,name);
+    if(!fs.existsSync(p)){
+      fs.writeFileSync(p,content,'utf8');
+      continue;
+    }
+    try{
+      if(name==='config.json') await configMod.loadConfig(p);
+      else if(name==='state.json') await stateMod.loadState(p);
+      else if(name==='index.json') await indexMod.loadIndex(p);
+      else JSON.parse(fs.readFileSync(p,'utf8'));
+    }catch{
+      fs.writeFileSync(p,content,'utf8');
+    }
+  }
+  console.log('Data directory ready:',base);
+}).catch(err=>{
+  console.error(String(err));
+  process.exit(1);
+});
 "
 ```
 
-Tell the user: the embedding model (~120MB) is now downloading. This only happens once.
+Tell the user the data directory is ready.
 
-Pre-warm the embedding model (replace `PLUGIN_DIR` with actual path, downloads model on first run):
+Optionally pre-warm the local embedding model when the current config uses `provider: "local"` (replace `PLUGIN_DIR` with actual path):
 
 ```bash
 node -e "
-const {execFileSync}=require('child_process'),path=require('path');
-const promptHook=path.join('PLUGIN_DIR','dist','hooks','prompt.js');
-try{
-  execFileSync(process.execPath,[promptHook],{
-    input:JSON.stringify({prompt:'warmup',cwd:process.cwd()}),
-    stdio:['pipe','pipe','pipe'],
-    timeout:180000
-  });
-  console.log('Model ready');
-}catch(e){
-  console.log('Model ready (warm-up note:',e.stderr?.toString().slice(0,100)||'none',')');
+const fs=require('fs'),path=require('path'),os=require('os');
+const {pathToFileURL}=require('url');
+const base=path.join(os.homedir(),'.claude','openarche');
+const config=JSON.parse(fs.readFileSync(path.join(base,'config.json'),'utf8'));
+if(config.knowledge.embedding.provider!=='local'){
+  console.log('Skipped local model warm-up because remote embeddings are configured');
+  process.exit(0);
 }
+const embeddingPath=path.join('PLUGIN_DIR','dist','knowledge','embedding.js');
+import(pathToFileURL(embeddingPath).href).then(async mod=>{
+  await mod.embed('warmup',config);
+  console.log('Local model ready');
+}).catch(err=>{
+  console.error(String(err));
+  process.exit(1);
+});
 "
 ```
 
-## Step 4: Register hooks and statusLine
+Tell the user a local embedding model download can happen on first use. Skip this message when the current config uses remote embeddings.
+
+## Step 4: Register Hooks And Status Line
 
 Get the settings.json path:
 
@@ -133,54 +168,68 @@ node -e "const os=require('os'),path=require('path');console.log(path.join(os.ho
 
 Read that file using the Read tool. If it does not exist, start with `{}`.
 
-Merge in the following hooks. Use `path.join(pluginDir, 'dist', 'hooks', 'prompt.js')` etc. to build paths (cross-platform). Replace `RUNTIME` with the full node path from Step 1:
+When explaining this step to the user, say that OpenArche is registering:
+
+- a prompt hook for task interception
+- a stop hook for task closeout and knowledge capture
+- a status line command when the slot is free
+
+Also explain the user-visible effect in plain language:
+
+- complex tasks can be automatically moved into a harness session
+- OpenArche will keep missing stages visible
+- task closeout and knowledge capture can happen after stop
+
+Merge in the following hooks. Use `path.join(pluginDir, 'dist', 'integrations', 'claude', 'prompt-hook.js')` etc. to build paths (cross-platform). Replace `RUNTIME` with the full node path from Step 1:
 
 ```json
 {
   "hooks": {
     "UserPromptSubmit": [{
       "matcher": "",
-      "hooks": [{"type": "command", "command": "RUNTIME PLUGIN_DIR/dist/hooks/prompt.js"}]
+      "hooks": [{"type": "command", "command": "RUNTIME PLUGIN_DIR/dist/integrations/claude/prompt-hook.js"}]
     }],
     "Stop": [{
       "matcher": "",
-      "hooks": [{"type": "command", "command": "RUNTIME PLUGIN_DIR/dist/hooks/stop.js"}]
+      "hooks": [{"type": "command", "command": "RUNTIME PLUGIN_DIR/dist/integrations/claude/stop-hook.js"}]
     }]
   }
 }
 ```
 
-If `statusLine` key does not already exist in settings.json, add:
+If `statusLine` does not already exist in `settings.json`, add:
 ```json
-{"statusLine": {"type": "command", "command": "RUNTIME PLUGIN_DIR/dist/hooks/status-line.js"}}
+{"statusLine": {"type": "command", "command": "RUNTIME PLUGIN_DIR/dist/integrations/claude/status-line.js"}}
 ```
-If `statusLine` already exists (e.g. claude-hud), skip — do not overwrite.
+If `statusLine` already exists, skip it and do not overwrite.
 
-Write the merged object back to the settings.json path using the Write tool.
+Write the merged object back to `settings.json`.
 
-## Step 5: Bootstrap
+## Step 5: Bootstrap Knowledge
 
-Count unprocessed transcripts:
+Count bootstrap-eligible transcripts using the same filtering rules as the product:
 
 ```bash
 node -e "
 const fs=require('fs'),path=require('path'),os=require('os');
-const projectsDir=path.join(os.homedir(),'.claude','projects');
-const processedFile=path.join(os.homedir(),'.claude','openarche','processed.json');
-let processed=new Set();
-try{processed=new Set(JSON.parse(fs.readFileSync(processedFile,'utf8')));}catch{}
-let count=0;
-try{
-  for(const proj of fs.readdirSync(projectsDir,{withFileTypes:true})){
-    if(!proj.isDirectory())continue;
-    try{
-      for(const f of fs.readdirSync(path.join(projectsDir,proj.name))){
-        if(f.endsWith('.jsonl')&&!processed.has(path.join(projectsDir,proj.name,f)))count++;
-      }
-    }catch{}
+const {pathToFileURL}=require('url');
+const base=path.join(os.homedir(),'.claude','openarche');
+const bootstrapPath=path.join('PLUGIN_DIR','dist','knowledge','bootstrap.js');
+import(pathToFileURL(bootstrapPath).href).then(async mod=>{
+  const processedPath=path.join(base,'capture-log.json');
+  let processed=new Set();
+  try{
+    processed=new Set(JSON.parse(fs.readFileSync(processedPath,'utf8')));
+  }catch(err){
+    if(err.code!=='ENOENT') throw err;
   }
-}catch{}
-console.log(count);
+  const projectsDir=path.join(os.homedir(),'.claude','projects');
+  const paths=await mod.findUnprocessedTranscripts(projectsDir,processed);
+  console.log(paths.length);
+}).catch(err=>{
+  console.error(String(err));
+  process.exit(1);
+});
 "
 ```
 
@@ -190,12 +239,14 @@ Check if ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY is set:
 node -e "console.log(process.env.ANTHROPIC_AUTH_TOKEN?'AUTH_TOKEN_SET':process.env.ANTHROPIC_API_KEY?'API_KEY_SET':'NO_KEY');"
 ```
 
-If NO_KEY: tell the user bootstrap requires an API key and skip to Step 6.
+If the transcript count is `0`, tell the user there is nothing to import and skip to Step 6.
+
+If the transcript count is greater than `0` and the result is `NO_KEY`, tell the user bootstrap requires an API key and skip to Step 6.
 
 Use AskUserQuestion:
-- header: "历史经验导入"
-- question: "发现 N 个历史对话记录。是否从中提取开发经验作为初始记忆库？（分析在后台进行，不影响你继续使用 Claude Code）" (replace N with actual count)
-- options: ["是，帮我分析", "不，从现在开始积累"]
+- header: "Import"
+- question: "OpenArche found N prior Claude transcripts. Import reusable engineering knowledge from them in the background?" (replace N with actual count)
+- options: ["Yes, import", "No, start fresh"]
 
 If yes:
 
@@ -206,13 +257,19 @@ const cacheDir=path.join(os.homedir(),'.claude','plugins','cache','openarche','o
 const versions=fs.readdirSync(cacheDir).sort();
 const pluginDir=path.join(cacheDir,versions[versions.length-1]);
 const env=Object.assign({},process.env);
-const child=spawn(process.execPath,[path.join(pluginDir,'dist','extractor','bootstrap.js')],{detached:true,stdio:'ignore',env});
+const child=spawn(process.execPath,[path.join(pluginDir,'dist','knowledge','bootstrap.js')],{detached:true,stdio:'ignore',env});
 child.unref();
 console.log('Bootstrap started');
 "
 ```
 
-Tell user bootstrap is running in the background. StatusLine will show `extracting X/Y...` progress.
+Tell the user bootstrap is running in the background. The status line will show `knowledge sync X/Y...` progress.
+
+End with a short plain-language summary. Use this structure:
+
+- OpenArche is ready
+- what will now happen automatically on complex tasks
+- what the user should do next: use Claude Code normally and open the explicit commands only when they want direct control
 
 ## Step 6: Verify
 
@@ -220,7 +277,7 @@ Use AskUserQuestion:
 - question: "Setup complete! Start a new conversation and OpenArche will work automatically. All good?"
 - options: ["Yes", "Something's wrong"]
 
-If something's wrong, help the user check:
+If something is wrong, help the user check the setup result and hook registration.
 1. Re-run the path detection from Step 2, confirm `dist/` exists
 2. Run `node --version` to verify Node.js is accessible
 3. Re-run the `node -e` path command from Step 4, Read settings.json and confirm hooks are present

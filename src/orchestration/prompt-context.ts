@@ -1,0 +1,166 @@
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { loadConfig } from '../config.js';
+import { createProductManifest } from '../product/manifest.js';
+import { loadState, saveState } from '../state.js';
+import { loadIndex, mutateIndex } from '../knowledge/index-store.js';
+import { embed } from '../knowledge/embedding.js';
+import { retrieve } from '../knowledge/search.js';
+import { ensureAutoHarnessFlow } from './auto-flow.js';
+import { escapeXml } from './context-xml.js';
+import { evaluateHarnessGateWithEmbeddings } from './gates.js';
+import { formatContextXml } from './context-xml.js';
+import { evaluateHarnessCompletion, synchronizeHarnessSession } from './session.js';
+
+export interface PromptContextRequest {
+  baseDir: string;
+  promptText: string;
+  cwd?: string;
+}
+
+export async function buildPromptContext(request: PromptContextRequest): Promise<string | null> {
+  const indexPath = join(request.baseDir, 'index.json');
+  const statePath = join(request.baseDir, 'state.json');
+  const configPath = join(request.baseDir, 'config.json');
+  const knowledgeDir = join(request.baseDir, 'knowledge');
+
+  const config = await loadConfig(configPath);
+  const manifest = createProductManifest('workspace');
+  const gate = await evaluateHarnessGateWithEmbeddings(request.promptText, config);
+  const readiness = Number((
+    Object.values(manifest.capabilities).reduce((sum, capability) => (
+      sum + (
+        !capability.enabled ? 0
+        : capability.maturity === 'operational' ? 1
+        : capability.maturity === 'prototype' ? 0.65
+        : 0.35
+      )
+    ), 0) / Object.values(manifest.capabilities).length
+  ).toFixed(2));
+  const autoFlow = await ensureAutoHarnessFlow(request.baseDir, request.promptText, request.cwd);
+  if (request.cwd && autoFlow?.sessionId) {
+    const synchronized = await synchronizeHarnessSession(request.cwd, autoFlow.sessionId);
+    if (synchronized) {
+      autoFlow.completion = evaluateHarnessCompletion(synchronized);
+    }
+  }
+  const index = await loadIndex(indexPath);
+  const capabilityXml = Object.values(manifest.capabilities).map(capability =>
+    `  <capability name="${escapeXml(capability.name)}" enabled="${capability.enabled}" maturity="${escapeXml(capability.maturity)}" required_for="${escapeXml(capability.requiredFor.join(','))}" evidence_driven="${capability.evidenceDriven}" automated_by_default="${capability.automatedByDefault}">${escapeXml(`${capability.summary} Responsibilities: ${capability.responsibilities.join(' ')}`)}</capability>`
+  ).join('\n');
+  const workflowXml = [
+    '  <step capability="planning">Define the objective, acceptance criteria, and explicit execution steps before large changes.</step>',
+    '  <step capability="worktree">Use an isolated git worktree or branch session for task execution.</step>',
+    '  <step capability="browser">Collect browser evidence when UI behavior or user journeys matter.</step>',
+    '  <step capability="observability">Inspect logs, metrics, and traces when reliability or performance is part of the task.</step>',
+    '  <step capability="review">Run self-review and repair loops before merge.</step>',
+    '  <step capability="maintenance">Capture reusable knowledge and clean low-signal drift after delivery.</step>',
+  ].join('\n');
+  const policyXml = [
+    '  <rule>For non-trivial changes, plan before editing.</rule>',
+    '  <rule>Keep execution isolated from the default workspace.</rule>',
+    '  <rule>Attach validation evidence before considering the task done.</rule>',
+    '  <rule>Run review and repair loops before merge.</rule>',
+    '  <rule>Capture reusable engineering knowledge after the task.</rule>',
+  ].join('\n');
+  const gateSummary = gate.required
+    ? `This task is being placed under harness control because ${gate.reasons.join(' ').toLowerCase() || 'it is not safe to treat it as a light task.'}`
+    : 'This task stays light, so only minimal harness context is injected.';
+  const gateXml = [
+    `  <gate required="${gate.required}" complexity="${escapeXml(gate.complexity)}" stages="${escapeXml(gate.requiredStages.join(','))}">${escapeXml(gate.reasons.join(' ') || 'Light task; minimal harness stages are sufficient.')}</gate>`,
+    `  <impact>${escapeXml(gateSummary)}</impact>`,
+    gate.required
+      ? `  <operator_expectation>${escapeXml(`Do not treat this as a one-shot chat task. Keep the remaining stages explicit until ${gate.requiredStages.join(', ')} are either satisfied or intentionally acknowledged.`)}</operator_expectation>`
+      : `  <operator_expectation>${escapeXml('Answer directly, but still keep the work grounded and avoid drifting into uncontrolled complexity.')}</operator_expectation>`,
+  ].join('\n');
+  const sessionXml = autoFlow?.sessionId
+    ? [
+        `  <session_summary>${escapeXml(
+          autoFlow.completion?.ready
+            ? 'OpenArche has already closed all required gates for this task.'
+            : `OpenArche is preventing this task from closing before ${autoFlow.completion?.incompleteStages.join(', ') || 'the remaining required stages'} are explicit.`
+        )}</session_summary>`,
+        `  <session id="${escapeXml(autoFlow.sessionId)}" complexity="${escapeXml(autoFlow.complexity)}" required="${autoFlow.required}">`,
+        `    <summary>${escapeXml(autoFlow.completion?.ready ? 'The harness session is closed.' : `The harness session is active. Remaining stages: ${autoFlow.completion?.incompleteStages.join(', ') || 'unknown'}.`)}</summary>`,
+        `    <completion ready="${autoFlow.completion?.ready ?? false}" incomplete="${escapeXml(autoFlow.completion?.incompleteStages.join(',') ?? '')}" completed="${escapeXml(autoFlow.completion?.completedStages.join(',') ?? '')}">${escapeXml(autoFlow.completion?.summary ?? 'Harness session exists but completion state is unavailable.')}</completion>`,
+        ...(autoFlow.warnings.length > 0 ? autoFlow.warnings.map(warning => `    <warning>${escapeXml(warning)}</warning>`) : []),
+        '  </session>',
+      ].join('\n')
+    : `  <session active="false">${escapeXml('No active harness session is required for this prompt.')}</session>`;
+  const baseContext = `<openarche_context>\n<capabilities readiness="${readiness.toFixed(2)}">\n${capabilityXml}\n</capabilities>\n<harness_policy mode="required">\n${policyXml}\n${gateXml}\n${sessionXml}\n</harness_policy>\n<workflow>\n${workflowXml}\n</workflow>\n</openarche_context>`;
+  const state = await loadState(statePath);
+  state.activeSession = autoFlow?.sessionId && autoFlow.completion
+    ? {
+        id: autoFlow.sessionId,
+        complexity: autoFlow.complexity,
+        incompleteStages: autoFlow.completion.incompleteStages,
+        summary: autoFlow.completion.ready
+          ? 'All required harness gates are closed.'
+          : `Harness opened. Remaining stages: ${autoFlow.completion.incompleteStages.join(', ')}.`,
+        updatedAt: Date.now(),
+      }
+    : null;
+  if (index.entries.length === 0) {
+    await saveState(statePath, state);
+    return baseContext;
+  }
+
+  let results;
+  try {
+    const queryEmbedding = await embed(request.promptText, config);
+    results = await Promise.resolve(
+      retrieve(
+        index,
+        queryEmbedding,
+        config.knowledge.retrieval.threshold,
+        config.knowledge.retrieval.topK,
+        request.cwd
+      )
+    );
+  } catch {
+    await saveState(statePath, state);
+    return baseContext;
+  }
+  if (results.length === 0) {
+    await saveState(statePath, state);
+    return baseContext;
+  }
+
+  const bodyMap = new Map<string, string>();
+  let totalChars = 0;
+  for (const result of results) {
+    try {
+      const body = await readFile(join(knowledgeDir, `${result.entry.id}.md`), 'utf8');
+      const bodyOnly = body.split('---\n').slice(2).join('---\n').trim();
+      if (totalChars + bodyOnly.length > config.knowledge.retrieval.maxInjectChars) break;
+      bodyMap.set(result.entry.id, bodyOnly);
+      totalChars += bodyOnly.length;
+    } catch {
+      continue;
+    }
+  }
+
+  const filtered = results.filter(result => bodyMap.has(result.entry.id));
+  if (filtered.length === 0) {
+    await saveState(statePath, state);
+    return baseContext;
+  }
+
+  state.lastRecall = { count: filtered.length, at: Date.now(), titles: filtered.map(result => result.entry.title) };
+  await saveState(statePath, state);
+
+  const now = Date.now();
+  await mutateIndex(indexPath, freshIndex => {
+    for (const result of filtered) {
+      const entryIndex = freshIndex.entries.findIndex(entry => entry.id === result.entry.id);
+      if (entryIndex >= 0) {
+        freshIndex.entries[entryIndex].access_count += 1;
+        freshIndex.entries[entryIndex].last_accessed = now;
+        freshIndex.entries[entryIndex].score = Math.min(5.0, freshIndex.entries[entryIndex].score + 0.1);
+      }
+    }
+  });
+
+  const knowledgeXml = formatContextXml(filtered, index.entries.length, id => bodyMap.get(id) ?? '');
+  return `<openarche_context>\n<capabilities readiness="${readiness.toFixed(2)}">\n${capabilityXml}\n</capabilities>\n<harness_policy mode="required">\n${policyXml}\n${gateXml}\n${sessionXml}\n</harness_policy>\n<workflow>\n${workflowXml}\n</workflow>\n${knowledgeXml}\n</openarche_context>`;
+}

@@ -1,247 +1,102 @@
 # OpenArche [![English](https://img.shields.io/badge/Docs-English-red?style=flat-square)](README.md) [![简体中文](https://img.shields.io/badge/文档-简体中文-blue?style=flat-square)](README_ZH.md)
 
-Local developer memory plugin for Claude Code. Automatically learns from your conversations and recalls relevant knowledge when you need it — fully local, zero cloud dependency.
-
-## Why
-
-OpenArche solves three problems every developer hits with Claude Code:
-
-1. **No memory between sessions** — every conversation starts from scratch, repeating the same context every time
-2. **Re-solving the same problems across projects** — a solution you figured out in project A is forgotten by the time you're in project B
-3. **No personalization** — Claude never learns your tech preferences, your decisions, or the traps you've already fallen into
-
-OpenArche fixes all three by silently building a local knowledge base from your conversations, and surfacing the right knowledge exactly when you need it.
+OpenArche is a harness-first Claude Code plugin for non-trivial engineering work. It keeps complex tasks from closing before planning, validation, review, and closeout are explicit.
 
 ## Features
 
-- **Auto-extract** — after each conversation, extracts reusable insights via Claude Haiku and stores them as local Markdown files
-- **Auto-inject** — before each prompt, vector-searches relevant memories and injects them as hidden context for Claude (invisible to you, visible to Claude)
-- **Smart reranking** — supports local weighted reranking (similarity+quality+recency+frequency) or remote rerank API
-- **Knowledge graph** — memories link to each other bidirectionally; retrieval expands through BFS graph traversal for richer context
-- **StatusLine** — real-time memory count and last match in the Claude Code status bar
+- `Task grading`: decides whether a task stays light or enters harness control
+- `Persistent sessions`: keeps non-light work in `.openarche/` with explicit stage state
+- `Stage gates`: keeps validation, review, and maintenance open until they are actually closed
+- `Context injection`: adds current task state, gate reasons, and relevant local knowledge
+- `Knowledge recall`: retrieves local engineering knowledge through embeddings and link expansion
+- `Background closeout`: captures reusable knowledge after the task stops
 
-## Getting started
+## Installation
 
-**1. Add the plugin:**
+1. Add the marketplace entry:
 
-```
+```text
 /plugin marketplace add Done-0/openarche
 ```
 
-**2. Install:**
+2. Install the plugin:
 
-```
+```text
 /plugin install openarche
 ```
 
-Then reload the plugin:
+3. Reload plugins:
 
-```
+```text
 /reload-plugin
 ```
 
-**3. Run setup:**
+4. Run setup:
 
-```
+```text
 /openarche:setup
 ```
 
-Setup handles all configuration automatically and optionally bootstraps from your conversation history. Downloads the local embedding model (~120MB) on first run — one time only.
+## How It Works
 
-**4. Done.** OpenArche runs fully automatically in the background.
-
-## Updating
-
-To update OpenArche to the latest version:
-
-```
-/plugin update openarche
-/reload-plugin
-```
+1. Use Claude Code as usual.
+2. Light tasks stay lightweight. Moderate and high-complexity tasks open a harness session automatically.
+3. OpenArche tells Claude Code why the task was gated, which stages are still open, and which local knowledge is relevant.
+4. The status line and session state keep showing what is still open, so the task does not quietly close too early.
+5. Validation, review, and maintenance stay open until the required evidence is recorded in the session artifacts.
+6. When the task stops, OpenArche closes out the session and queues reusable knowledge capture for that transcript.
 
 ## Commands
 
 | Command | Description |
-|---------|-------------|
-| `/openarche:setup` | Initialize plugin, batch-extract memories from all conversation history |
-| `/openarche:extract` | Manually trigger extraction from qualifying conversation history |
-| `/openarche:config` | View or update configuration |
-| `/openarche:save` | Manually save an insight from the current conversation |
-| `/openarche:list` | List recently stored memories |
-| `/openarche:search` | Search the memory library with a query |
-| `/openarche:forget` | Delete a memory by ID |
-| `/openarche:reindex` | Rebuild vector index after switching embedding models |
+|---|---|
+| `/openarche:setup` | Prepare OpenArche for automatic task interception, harness sessions, and optional knowledge import |
+| `/openarche:config` | View or update grouped capability configuration |
+| `/openarche:plan` | Produce an execution plan with objective, acceptance criteria, and explicit task coverage |
+| `/openarche:run` | Turn a plan into an execution checklist |
+| `/openarche:validate` | Define browser and task validation expectations |
+| `/openarche:observe` | Define investigation queries and targets |
+| `/openarche:review` | Drive self-review, local agent review, cloud agent review, and repair loops |
+| `/openarche:maintain` | Run maintenance and drift-reduction workflows |
+| `/openarche:knowledge-search` | Search reusable engineering knowledge |
+| `/openarche:knowledge-save` | Persist reusable engineering knowledge explicitly |
+| `/openarche:knowledge-reindex` | Rebuild the knowledge vector index after embedding model changes |
 
 ## Configuration
 
-Run `/openarche:config` to view and change settings interactively.
+Config file:
 
-Config file: `<home>/.claude/openarche/config.json`
-
-```json
-{
-  "embedding": {
-    "provider": "local",
-    "localModel": "Xenova/multilingual-e5-small",
-    "remoteModel": "",
-    "remoteApiKey": "",
-    "remoteBaseUrl": ""
-  },
-  "retrieval": {
-    "threshold": 0.73,
-    "topK": 3,
-    "maxInjectChars": 3000,
-    "reranking": {
-      "enabled": false,
-      "provider": "local",
-      "remoteModel": "",
-      "remoteApiKey": "",
-      "remoteBaseUrl": "",
-      "weights": {
-        "similarity": 0.7,
-        "quality": 0.2,
-        "recency": 0.05,
-        "frequency": 0.05
-      }
-    }
-  },
-  "extraction": {
-    "model": "claude-haiku-4-5-20251001",
-    "minQualityScore": 0.6,
-    "bootstrapConcurrency": 3
-  }
-}
+```text
+<home>/.claude/openarche/config.json
 ```
 
-| Field | Default | Description |
-|-------|---------|-------------|
-| `embedding.provider` | `local` | `local` (local) or `remote` (remote). After switching, run `/openarche:reindex` |
-| `embedding.localModel` | `Xenova/multilingual-e5-small` | Local embedding model, 100+ languages, ~120MB |
-| `embedding.remoteModel` | `""` | Remote embedding model (e.g. `text-embedding-3-small`, `BAAI/bge-m3`) |
-| `embedding.remoteApiKey` | `""` | Remote embedding API key |
-| `embedding.remoteBaseUrl` | `""` | Remote API base URL (supports all OpenAI-compatible APIs like SiliconFlow, DeepSeek) |
-| `retrieval.threshold` | `0.73` | Cosine similarity cutoff. Higher = fewer but more relevant results |
-| `retrieval.topK` | `3` | Max seed memories injected per prompt |
-| `retrieval.maxInjectChars` | `3000` | Max injected characters per prompt |
-| `retrieval.reranking.enabled` | `false` | Enable reranking |
-| `retrieval.reranking.provider` | `local` | `local` (weighted local) or `remote` (remote rerank API) |
-| `retrieval.reranking.remoteModel` | `""` | Remote rerank model (e.g. `BAAI/bge-reranker-v2-m3`) |
-| `retrieval.reranking.remoteApiKey` | `""` | Remote rerank API key |
-| `retrieval.reranking.remoteBaseUrl` | `""` | Remote rerank API base URL |
-| `retrieval.reranking.weights.*` | See config | Local reranking weights (similarity: 0.7, quality: 0.2, recency: 0.05, frequency: 0.05) |
-| `extraction.model` | `claude-haiku-4-5-20251001` | Claude model used for extraction |
-| `extraction.minQualityScore` | `0.6` | Discard insights below this quality score |
-| `extraction.bootstrapConcurrency` | `3` | Parallel transcripts during bootstrap |
+- `knowledge.embedding.provider`: `local` or `remote`
+- `knowledge.retrieval`: recall threshold, recall fanout, and injection budget
+- `knowledge.extraction`: extraction model and capture concurrency
+- `execution`: isolation strategy and base ref
+- `validation.browser`: required browser evidence
+- `observability`: logs, metrics, and traces requirements
+- `review`: self-review, local agent review, cloud agent review, repair loops
+- `maintenance`: quality and drift cleanup
 
----
+If the embedding provider changes, run:
+
+```text
+/openarche:knowledge-reindex
+```
 
 ## Architecture
 
+```text
+src/
+├── product/             # product manifest and capability readiness
+├── planning/            # execution plans and acceptance criteria
+├── execution/           # isolated task-session definition
+├── validation/          # validation protocols and browser evidence gates
+├── observability/       # logs, metrics, and traces evidence gates
+├── review/              # mechanical review gates and repair-loop state
+├── maintenance/         # task closeout and follow-up cleanup state
+├── orchestration/       # harness assembly, session sync, Claude-facing context
+├── knowledge/           # extraction, indexing, retrieval, and writing
+└── integrations/claude/ # Claude Code adapters only
 ```
-┌──────────────────────────────────────────────────────────┐
-│                      Claude Code CLI                     │
-│                                                          │
-│   UserPromptSubmit hook           Stop hook              │
-│           │                           │                  │
-└───────────┼───────────────────────────┼──────────────────┘
-            │                           │
-            ▼                           ▼
-    hooks/prompt.ts              hooks/stop.ts
-            │                           │
-            │ embed + search            │ spawn detached
-            ▼                           ▼
-     engine/search.ts         extractor/index.ts
-     ┌─────────────┐          ┌──────────────────┐
-     │ cosine sim  │          │  Claude Haiku API│
-     │ BFS expand  │          │  (ANTHROPIC_*)   │
-     └──────┬──────┘          └────────┬─────────┘
-            │                          │
-            │ stdout XML               │ write .md
-            ▼                          ▼
-    <arche_context>           engine/writer.ts
-    (Claude context)           engine/graph.ts
-
-    hooks/status-line.ts  ←  state.json
-```
-
-## Data flow
-
-### Injection (every prompt)
-
-```
-hooks/prompt.ts
-  ├─ read transcript → get last human message
-  ├─ embed(prompt)            # ~5ms local / ~200ms remote
-  ├─ vectorSearch()           # cosine sim > threshold, top-K
-  ├─ bfsExpand()              # one-hop BFS over links
-  ├─ read .md bodies, truncate to maxInjectChars
-  ├─ stdout → <arche_context> XML injected before user prompt:
-  │     <arche_context matched="N" total="M">
-  │       <memory id="..." type="..." score="..." age="Xd" project="..." via="vector">
-  │         memory body
-  │       </memory>
-  │       ...
-  │     </arche_context>
-  └─ update state.json + score/access_count
-```
-
-### Extraction (after each conversation)
-
-```
-hooks/stop.ts
-  ├─ scan all unprocessed .jsonl under ~/.claude/projects/
-  ├─ skip: already in processed.json
-  ├─ skip: file mtime < 12h (conversation still active)
-  ├─ skip: no tool_use / user turns < 5
-  ├─ write payload to temp file per qualifying transcript
-  ├─ spawn detached extractor/index.ts <tmpFile> per file
-  └─ child.unref() → main process exits immediately
-
-[background process] extractor/index.ts
-  ├─ callHaiku(transcript)    # Anthropic API
-  ├─ filter quality < minQualityScore
-  ├─ embed(title + trigger_context)
-  ├─ cosine >= 0.95 → skip (near-exact duplicate)
-  ├─ cosine >= 0.85 → upsertMemory()   # overwrite existing .md + updateMemory()
-  ├─ else → writeMemory()              # write .md + appendMemory()
-  ├─ matchLinksHints() + buildLinks()  # bidirectional edges
-  └─ update state.json(totalMemories)
-```
-
-## Storage
-
-```
-<home>/.claude/openarche/
-├── memories/
-│   ├── abc123.md        # YAML frontmatter + free-form body
-│   └── def456.md
-├── index.json           # Metadata + float32 embedding vectors
-├── processed.json       # Processed transcript paths (dedup)
-├── state.json           # Live state bridge between hooks and StatusLine
-├── models/              # Local embedding model cache
-└── config.json          # User configuration
-```
-
-`<home>` is your user home directory (`~` on macOS/Linux, `%USERPROFILE%` on Windows).
-
-## Memory types
-
-Each memory has a type (what kind of insight) and a structure (how the logic is organized) — independent of each other:
-
-| Type | Meaning |
-|------|---------|
-| `solution` | How to solve a specific technical problem |
-| `decision` | Architecture or technology choice with reasoning |
-| `pattern` | Reusable code or design pattern |
-| `gotcha` | Non-obvious behavior, warning, or trap |
-
-| Structure | Meaning |
-|-----------|---------|
-| `atomic` | Single fact, one paragraph |
-| `linear` | Ordered steps (trigger → root cause → steps → boundary conditions) |
-| `tree` | Decision branches (scenario → tree → choice → reconsider when) |
-| `graph` | Concept network, bidirectionally linked to other memories |
-
-## License
-
-MIT

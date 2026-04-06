@@ -1,4 +1,4 @@
-export interface ArcheEntry {
+export interface KnowledgeEntry {
   id: string;
   title: string;
   type: 'solution' | 'decision' | 'pattern' | 'gotcha';
@@ -13,52 +13,79 @@ export interface ArcheEntry {
   quality_breakdown: { reusability: number; non_obviousness: number; clarity: number; completeness: number };
   created_at: number;
   last_accessed: number | null;
-  /** float32 vector, length matches embedding model (384 for multilingual-e5-small, 1536 for text-embedding-3-small) */
   embedding: number[];
 }
 
-export interface ArcheIndex {
+export interface KnowledgeIndex {
   version: 1;
-  memories: ArcheEntry[];
+  entries: KnowledgeEntry[];
 }
 
-export interface AppConfig {
-  embedding: {
-    provider: 'local' | 'remote';
-    localModel: string;
-    remoteModel?: string;
-    remoteApiKey?: string;
-    remoteBaseUrl?: string;
-  };
-  retrieval: {
-    threshold: number;
-    topK: number;
-    maxInjectChars: number;
-    reranking?: {
-      enabled: boolean;
-      provider?: 'local' | 'remote';
-      remoteModel?: string;
-      remoteApiKey?: string;
-      remoteBaseUrl?: string;
-      weights: {
-        similarity: number;
-        quality: number;
-        recency: number;
-        frequency: number;
-      };
+export interface ProductConfig {
+  knowledge: {
+    embedding:
+      | {
+          provider: 'local';
+          localModel: string;
+        }
+      | {
+          provider: 'remote';
+          remoteModel: string;
+          remoteApiKey: string;
+          remoteBaseUrl: string;
+        };
+    retrieval: {
+      threshold: number;
+      topK: number;
+      maxInjectChars: number;
+    };
+    extraction: {
+      model: string;
+      minQualityScore: number;
+      captureConcurrency: number;
     };
   };
-  extraction: {
-    model: string;
-    minQualityScore: number;
-    bootstrapConcurrency: number;
+  execution: {
+    isolationStrategy: 'git-worktree' | 'git-branch';
+    baseRef: string;
+  };
+  validation: {
+    browser: {
+      enabled: boolean;
+      captureDomSnapshot: boolean;
+      captureScreenshot: boolean;
+      captureNavigation: boolean;
+    };
+  };
+  observability: {
+    enabled: boolean;
+    logs: boolean;
+    metrics: boolean;
+    traces: boolean;
+  };
+  review: {
+    localSelfReview: boolean;
+    localAgentReview: boolean;
+    cloudAgentReview: boolean;
+    repairLoops: number;
+  };
+  maintenance: {
+    qualitySweep: boolean;
+    driftSweep: boolean;
   };
 }
 
 export interface AppState {
-  totalMemories: number;
-  lastMatch: { count: number; at: number; titles: string[] } | null;
-  bootstrapping: { current: number; total: number };
+  knowledgeCount: number;
+  lastRecall: { count: number; at: number; titles: string[] } | null;
+  captureSync: { current: number; total: number };
+  activeSession: {
+    id: string;
+    complexity: 'light' | 'moderate' | 'high';
+    incompleteStages: Array<'plan' | 'execute' | 'validate' | 'observe' | 'review' | 'maintain'>;
+    summary: string;
+    updatedAt: number;
+  } | null;
 }
 
 export interface StdinData {

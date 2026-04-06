@@ -1,16 +1,16 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "openarche",
-  "version": "0.1.6",
-  "description": "Persistent local memory for Claude Code — auto-extracts insights from your conversations and injects them as context, across all projects",
+  "version": "0.2.0",
+  "description": "Harness-first Claude Code plugin for staged engineering work and local knowledge recall",
   "owner": {
     "name": "Done-0"
   },
   "plugins": [
     {
       "name": "openarche",
-      "description": "Persistent local memory for Claude Code — auto-extracts insights from your conversations and injects them as context, across all projects",
-      "version": "0.1.6",
+      "description": "Harness-first Claude Code plugin for staged engineering work and local knowledge recall",
+      "version": "0.2.0",
       "author": {
         "name": "Done-0"
       },
