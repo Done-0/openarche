@@ -20,7 +20,7 @@ When showing the current config, group it by section and include the config path
 
 **Orchestration**
 - `orchestration.autoInject`
-- `orchestration.persistAfterFirstToolUse`
+- `orchestration.persistAfterFirstToolUse` — materialize after the first write-capable or execution-capable tool activity, not after read-only exploration
 - `orchestration.readOnlyCommands`
 - `orchestration.explicitSessionCommands`
 - `orchestration.injectOnlyIntentThreshold`

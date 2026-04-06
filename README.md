@@ -43,7 +43,7 @@ If you use local embeddings, the first successful run may need network access to
 ## How It Works
 
 1. Use Claude Code as usual.
-2. Light tasks stay lightweight. Non-light tasks receive harness context first, and `.openarche/` session artifacts are materialized only for explicit execution work or after real tool execution starts.
+2. Light tasks stay lightweight. Non-light tasks receive harness context first, and `.openarche/` session artifacts are materialized only for explicit execution work or after write-capable or execution-capable tool activity starts.
 3. OpenArche tells Claude Code why the task was gated, which stages are still open, and which local knowledge is relevant.
 4. The status line and session state keep showing what is still open, so the task does not quietly close too early.
 5. Validation, review, and maintenance stay open until the required evidence is recorded in the session artifacts.

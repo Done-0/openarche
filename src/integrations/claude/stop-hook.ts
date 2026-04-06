@@ -38,26 +38,60 @@ async function main(): Promise<void> {
   if (!transcript) return;
 
   const promptText = stdin.prompt ?? await getLastHumanMessage(stdin.transcript_path);
+  let sawExecutionToolUse = false;
+  for (const line of transcript.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line) as { message?: { role?: string; content?: Array<{ type?: string; name?: string; input?: Record<string, unknown> }> } };
+      if (entry.message?.role !== 'assistant' || !Array.isArray(entry.message.content)) continue;
+      for (const block of entry.message.content) {
+        if (block.type !== 'tool_use' || typeof block.name !== 'string') continue;
+        if (block.name === 'Read' || block.name === 'Glob' || block.name === 'Grep' || block.name === 'LS' || block.name === 'Skill') {
+          continue;
+        }
+        if (block.name === 'Bash') {
+          const command = typeof block.input?.command === 'string' ? block.input.command.replace(/\s+/g, ' ').trim() : '';
+          if (
+            command
+            && (
+              /(^|[ (])(rm|mv|cp|touch|mkdir|rmdir|chmod|chown|ln|sed -i|perl -pi|apply_patch)([ )]|$)/.test(command)
+              || /(>|>>)/.test(command)
+              || /\bgit\s+(add|commit|switch|checkout|restore|reset|clean|rebase|merge|cherry-pick|worktree\s+add|branch\s+-[DM])\b/.test(command)
+              || /\b(npm|pnpm|yarn|bun|cargo|go|pytest|python|python3|node|deno|uv|make|just)\s+(run|test|build|start|dev|install|exec)\b/.test(command)
+            )
+          ) {
+            sawExecutionToolUse = true;
+            break;
+          }
+          continue;
+        }
+        sawExecutionToolUse = true;
+        break;
+      }
+      if (sawExecutionToolUse) break;
+    } catch {
+      continue;
+    }
+  }
   let autoFlow = null;
   if (promptText && stdin.cwd) {
     const config = await loadConfig(join(BASE_DIR, 'config.json'));
     const gate = await evaluateHarnessGateWithEmbeddings(promptText, config);
     const policy = await evaluateHarnessPolicy(promptText, config, gate);
-    const sawExecution = transcript.includes('"tool_use"') || transcript.includes('"tool_result"');
     autoFlow = await ensureAutoHarnessFlow(
       BASE_DIR,
       promptText,
       stdin.cwd,
-      { materialize: policy.materialize || config.orchestration.persistAfterFirstToolUse && sawExecution && gate.required, decision: policy }
+      { materialize: policy.materialize || config.orchestration.persistAfterFirstToolUse && sawExecutionToolUse && gate.required, decision: policy }
     );
   }
 
-  if (stdin.cwd && autoFlow?.sessionId && (transcript.includes('"tool_use"') || transcript.includes('"tool_result"'))) {
+  if (stdin.cwd && autoFlow?.sessionId && sawExecutionToolUse) {
     await recordHarnessStageCompletion(
       stdin.cwd,
       autoFlow.sessionId,
       'execute',
-      'Task transcript shows active tool execution for this harness session.',
+      'Task transcript shows execution-capable tool activity for this harness session.',
       [stdin.transcript_path]
     );
   }

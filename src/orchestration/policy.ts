@@ -2,7 +2,7 @@ import { cosineSimilarity, embed } from '../knowledge/embedding.js';
 import type { HarnessComplexity, HarnessGate } from '../contracts.js';
 import type { ProductConfig } from '../types.js';
 
-export type HarnessIntent = 'question' | 'configure' | 'execute';
+export type HarnessIntent = 'question' | 'configure' | 'analysis' | 'execute';
 export type HarnessPersistenceMode = 'skip' | 'inject_only' | 'materialize';
 
 export interface HarnessPolicyDecision {
@@ -85,6 +85,11 @@ export async function evaluateHarnessPolicy(
           embed('set up the tool or update runtime configuration without creating a task session', config),
           embed('check environment settings and report what changed', config),
         ]),
+        analysis: await Promise.all([
+          embed('inspect the current code and reason about whether the logic is correct before making changes', config),
+          embed('analyze architecture tradeoffs and explain what should change without editing files yet', config),
+          embed('review the current implementation and identify gaps before execution starts', config),
+        ]),
         execute: await Promise.all([
           embed('implement a change, verify it, review it, and finish the task end to end', config),
           embed('refactor or fix code with explicit validation and follow-up work', config),
@@ -96,6 +101,7 @@ export async function evaluateHarnessPolicy(
     const scores = {
       question: prototypeCache.question.reduce((best, candidate) => Math.max(best, cosineSimilarity(promptEmbedding, candidate)), -1),
       configure: prototypeCache.configure.reduce((best, candidate) => Math.max(best, cosineSimilarity(promptEmbedding, candidate)), -1),
+      analysis: prototypeCache.analysis.reduce((best, candidate) => Math.max(best, cosineSimilarity(promptEmbedding, candidate)), -1),
       execute: prototypeCache.execute.reduce((best, candidate) => Math.max(best, cosineSimilarity(promptEmbedding, candidate)), -1),
     };
     const ranked = Object.entries(scores).sort((a, b) => b[1] - a[1]) as Array<[HarnessIntent, number]>;
@@ -121,20 +127,18 @@ export async function evaluateHarnessPolicy(
       inject: true,
       materialize: false,
       mode: 'inject_only',
-      reasons: intent === 'configure' || score >= config.orchestration.injectOnlyIntentThreshold
+      reasons: intent === 'configure' || intent === 'analysis' || score >= config.orchestration.injectOnlyIntentThreshold
         ? [...gate.reasons, `Prompt intent aligns with ${intent} examples (score ${score.toFixed(2)}), so context is injected without materializing a task session.`]
         : [...gate.reasons, `Prompt intent is still ambiguous (score ${score.toFixed(2)}), so OpenArche stays in inject-only mode until execution begins.`],
     };
   } catch {
     return {
       command,
-      intent: 'execute',
+      intent: 'analysis',
       inject: true,
-      materialize: gate.complexity === 'high' || gate.complexity === 'moderate' && denseLength >= 80 && punctuationCount >= 1,
-      mode: gate.complexity === 'high' || gate.complexity === 'moderate' && denseLength >= 80 && punctuationCount >= 1 ? 'materialize' : 'inject_only',
-      reasons: gate.complexity === 'high' || gate.complexity === 'moderate' && denseLength >= 80 && punctuationCount >= 1
-        ? [...gate.reasons, 'Intent scoring was unavailable, so structurally strong execution work still materializes a harness session.']
-        : [...gate.reasons, 'Intent scoring was unavailable, so OpenArche falls back to inject-only mode.'],
+      materialize: false,
+      mode: 'inject_only',
+      reasons: [...gate.reasons, 'Intent scoring was unavailable, so OpenArche falls back to inject-only mode until explicit execution begins.'],
     };
   }
 }
