@@ -33,13 +33,19 @@ export async function ensureAutoHarnessFlow(baseDir: string, promptText: string,
 
   const routeMatches = Array.from(new Set(promptText.match(/\/[A-Za-z0-9/_-]+/g) ?? []));
   const lowerPrompt = promptText.toLowerCase();
+  const persistedObjective = promptText
+    .replace(/\bsk-[A-Za-z0-9_-]+\b/g, '[redacted-secret]')
+    .replace(/\bBearer\s+[A-Za-z0-9._~+\/=-]+\b/gi, 'Bearer [redacted-secret]')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 240) || 'Requested engineering change';
   const browserSignals = ['ui', 'page', 'screen', 'browser', 'dom', 'click', 'form', 'button', 'modal', 'navigation', 'checkout', 'signup', 'login', 'onboarding'];
   const observabilitySignals = ['latency', 'performance', 'reliability', 'timeout', 'slow', 'error', 'trace', 'metric', 'metrics', 'log', 'logs', 'throughput', 'availability'];
   const journeys = routeMatches.length > 0 || browserSignals.some(signal => lowerPrompt.includes(signal))
     ? [{
-        name: promptText.replace(/\s+/g, ' ').trim().slice(0, 80) || 'Primary journey',
+        name: persistedObjective.slice(0, 80) || 'Primary journey',
         route: routeMatches.length > 0 ? routeMatches : ['/'],
-        successSignal: promptText.replace(/\s+/g, ' ').trim().slice(0, 160) || 'The user-visible flow succeeds.',
+        successSignal: persistedObjective.slice(0, 160) || 'The user-visible flow succeeds.',
       }]
     : [];
   const services = gate.requiredStages.includes('observe') || observabilitySignals.some(signal => lowerPrompt.includes(signal))
@@ -53,7 +59,7 @@ export async function ensureAutoHarnessFlow(baseDir: string, promptText: string,
   const bundle = createHarnessBundle({
     manifest: createProductManifest('workspace'),
     config,
-    objective: promptText,
+    objective: persistedObjective,
     acceptanceCriteria: [
       'The requested change is implemented.',
       'Validation evidence exists for the requested change.',

@@ -21,7 +21,8 @@ When showing the current config, group it by section and include the config path
 **Knowledge**
 - `knowledge.embedding.provider`
 - If provider is `local`, show `knowledge.embedding.localModel`
-- If provider is `remote`, show `knowledge.embedding.remoteModel`, `knowledge.embedding.remoteApiKey`, and `knowledge.embedding.remoteBaseUrl`
+- If provider is `remote`, show `knowledge.embedding.remoteModel` and `knowledge.embedding.remoteBaseUrl`
+- Never print the full `knowledge.embedding.remoteApiKey`; show it as redacted or masked
 - `knowledge.retrieval.threshold`
 - `knowledge.retrieval.topK`
 - `knowledge.retrieval.maxInjectChars`
@@ -62,6 +63,7 @@ When editing:
 - If switching to `remote`, remove `localModel` and require `remoteModel`, `remoteApiKey`, and `remoteBaseUrl`.
 - Keep the final file fully valid. Do not leave partial config.
 - If the user selects `local`, remind them that the first successful embedding call may need network access to download model files.
+- If the user edits `remoteApiKey`, accept the new value but do not echo the full key back in the response.
 
 After writing the file back:
 
