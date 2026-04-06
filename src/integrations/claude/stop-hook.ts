@@ -36,6 +36,7 @@ async function main(): Promise<void> {
   if (!transcript) return;
 
   const promptText = stdin.prompt ?? await getLastHumanMessage(stdin.transcript_path);
+  let sawWriteToolUse = false;
   let sawExecutionToolUse = false;
   for (const line of transcript.split('\n')) {
     if (!line.trim()) continue;
@@ -47,19 +48,19 @@ async function main(): Promise<void> {
         if (block.name === 'Read' || block.name === 'Glob' || block.name === 'Grep' || block.name === 'LS' || block.name === 'Skill') continue;
         if (block.name === 'Bash') {
           const command = typeof block.input?.command === 'string' ? block.input.command.replace(/\s+/g, ' ').trim() : '';
-          if (
-            command
-            && (
-              /(^|[ (])(rm|mv|cp|touch|mkdir|rmdir|chmod|chown|ln|sed -i|perl -pi|apply_patch)([ )]|$)/.test(command)
-              || /(>|>>)/.test(command)
-              || /\bgit\s+(add|commit|switch|checkout|restore|reset|clean|rebase|merge|cherry-pick|worktree\s+add|branch\s+-[DM])\b/.test(command)
-              || /\b(npm|pnpm|yarn|bun|cargo|go|pytest|python|python3|node|deno|uv|make|just)\s+(run|test|build|start|dev|install|exec)\b/.test(command)
-            )
-          ) {
+          if (command && ((/(^|[ (])(rm|mv|cp|touch|mkdir|rmdir|chmod|chown|ln|sed -i|perl -pi|apply_patch)([ )]|$)/.test(command) || /(>|>>)/.test(command) || /\bgit\s+(add|commit|switch|checkout|restore|reset|clean|rebase|merge|cherry-pick|worktree\s+add|branch\s+-[DM])\b/.test(command)))) {
+            sawWriteToolUse = true;
+            sawExecutionToolUse = true;
+            break;
+          }
+          if (command && /\b(npm|pnpm|yarn|bun|cargo|go|pytest|python|python3|node|deno|uv|make|just)\s+(run|test|build|start|dev|install|exec)\b/.test(command)) {
             sawExecutionToolUse = true;
             break;
           }
           continue;
+        }
+        if (block.name === 'Write' || block.name === 'Edit' || block.name === 'MultiEdit' || block.name === 'NotebookEdit') {
+          sawWriteToolUse = true;
         }
         sawExecutionToolUse = true;
         break;
@@ -75,8 +76,14 @@ async function main(): Promise<void> {
     const config = await loadConfig(join(BASE_DIR, 'config.json'));
     const gate = await evaluateHarnessGateWithEmbeddings(promptText, config);
     const policy = await evaluateHarnessPolicy(promptText, config, gate);
+    const materializeAfterToolUse =
+      config.orchestration.persistAfterFirstToolUse === 'execute_or_write'
+        ? sawExecutionToolUse && gate.required
+        : config.orchestration.persistAfterFirstToolUse === 'write_only'
+          ? sawWriteToolUse && gate.required
+          : false;
     autoFlow = await ensureAutoHarnessFlow(BASE_DIR, promptText, stdin.cwd, {
-      materialize: policy.materialize || config.orchestration.persistAfterFirstToolUse && sawExecutionToolUse && gate.required,
+      materialize: policy.materialize || materializeAfterToolUse,
       decision: policy,
     });
   }

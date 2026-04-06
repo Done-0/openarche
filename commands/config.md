@@ -20,7 +20,8 @@ When showing the current config, group it by section and include the config path
 
 **Orchestration**
 - `orchestration.autoInject`
-- `orchestration.persistAfterFirstToolUse` — materialize after the first write-capable or execution-capable tool activity, not after read-only exploration
+- `orchestration.persistAfterFirstToolUse` — one of `false`, `write_only`, or `execute_or_write`
+  Production default is `write_only`, so read-only analysis does not materialize a persisted task session.
 - `orchestration.readOnlyCommands`
 - `orchestration.explicitSessionCommands`
 - `orchestration.injectOnlyIntentThreshold`

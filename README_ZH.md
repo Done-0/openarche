@@ -43,7 +43,7 @@ OpenArche 是一个面向 Claude Code 的 harness-first 工程插件，处理非
 ## 工作方式
 
 1. 像平时一样向 Claude Code 提任务。
-2. 轻量任务保持轻量；非轻量任务会先注入 harness 上下文，只有显式执行或真正发生可写入/可执行工具活动后才会建立 `.openarche/sessions/<task-id>/state.json` 任务会话。
+2. 轻量任务保持轻量；非轻量任务会先注入 harness 上下文，只有显式执行或默认情况下真正发生写入活动后才会建立 `.openarche/sessions/<task-id>/state.json` 任务会话。
 3. 系统会告诉 Claude Code 为什么这个任务被接管、还差哪些阶段、本地有哪些相关知识。
 4. 状态栏和会话状态会持续显示还没完成的环节，避免任务过早结束。
 5. 验证、评审、维护会一直保持打开状态，直到当前会话状态和证据目录里记录了所需证据。
@@ -114,14 +114,14 @@ OpenArche 是一个面向 Claude Code 的 harness-first 工程插件，处理非
 ├── sessions/
 │   └── <task-id>/
 │       ├── state.json
-│       └── evidence/
+│       └── evidence/         # 只有真正落证据时才会创建
 └── knowledge/
     ├── index.json
     └── <entry-id>.md
 ```
 
 - 会话状态、validation、review、maintenance 都在 `sessions/<task-id>/state.json` 内。
-- 机械化 review 的命令输出会落到 `sessions/<task-id>/evidence/`。
+- 机械化 review 的命令输出会在真正产生证据后落到 `sessions/<task-id>/evidence/`。
 - 仓库任务的 closeout 会把可复用知识写入仓库内 `.openarche/knowledge/`。
 - Prompt 检索时会优先用仓库知识，再回退到全局知识库。
 - `capture-log.json` 里保存的是 transcript 指纹和 `closeout:<fingerprint>` 队列项，不再保存原始路径。

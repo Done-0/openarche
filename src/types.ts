@@ -24,7 +24,7 @@ export interface KnowledgeIndex {
 export interface ProductConfig {
   orchestration: {
     autoInject: boolean;
-    persistAfterFirstToolUse: boolean;
+    persistAfterFirstToolUse: 'false' | 'write_only' | 'execute_or_write';
     readOnlyCommands: string[];
     explicitSessionCommands: string[];
     injectOnlyIntentThreshold: number;

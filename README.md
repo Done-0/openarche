@@ -43,7 +43,7 @@ If you use local embeddings, the first successful run may need network access to
 ## How It Works
 
 1. Use Claude Code as usual.
-2. Light tasks stay lightweight. Non-light tasks receive harness context first, and `.openarche/sessions/<task-id>/state.json` is materialized only for explicit execution work or after write-capable or execution-capable tool activity starts.
+2. Light tasks stay lightweight. Non-light tasks receive harness context first, and `.openarche/sessions/<task-id>/state.json` is materialized only for explicit execution work or, by default, after actual write activity starts.
 3. OpenArche tells Claude Code why the task was gated, which stages are still open, and which local knowledge is relevant.
 4. The status line and session state keep showing what is still open, so the task does not quietly close too early.
 5. Validation, review, and maintenance stay open until the required evidence is recorded inside the current session state and evidence directory.
@@ -114,14 +114,14 @@ Repository-scoped runtime state lives under:
 ├── sessions/
 │   └── <task-id>/
 │       ├── state.json
-│       └── evidence/
+│       └── evidence/         # created only after evidence is actually recorded
 └── knowledge/
     ├── index.json
     └── <entry-id>.md
 ```
 
 - Session state, validation, review, and maintenance all live inside `sessions/<task-id>/state.json`.
-- Mechanical review command output is written into `sessions/<task-id>/evidence/`.
+- Mechanical review command output is written into `sessions/<task-id>/evidence/` once evidence exists.
 - Closeout for repository tasks writes reusable knowledge into repository-local `.openarche/knowledge/`.
 - Prompt recall prefers repository-local knowledge and falls back to the global store.
 - `capture-log.json` stores transcript fingerprints and `closeout:<fingerprint>` queue entries instead of raw paths.

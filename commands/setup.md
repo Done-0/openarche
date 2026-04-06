@@ -131,11 +131,11 @@ const defaults={
   'config.json': JSON.stringify({
     orchestration:{
       autoInject:true,
-      persistAfterFirstToolUse:true,
+      persistAfterFirstToolUse:'write_only',
       readOnlyCommands:['/openarche:setup','/openarche:config','/openarche:knowledge-search'],
       explicitSessionCommands:['/openarche:plan','/openarche:run','/openarche:validate','/openarche:observe','/openarche:review','/openarche:maintain'],
       injectOnlyIntentThreshold:0.6,
-      materializeIntentThreshold:0.72
+      materializeIntentThreshold:0.8
     },
     knowledge:{
       embedding:{provider:'local',localModel:'Xenova/multilingual-e5-small'},

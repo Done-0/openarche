@@ -115,7 +115,6 @@ export function evaluateHarnessCompletion(session: HarnessSession): HarnessCompl
 
 export async function writeHarnessSession(rootDir: string, session: HarnessSession): Promise<string> {
   const targetPath = getHarnessSessionStatePath(rootDir, session.id);
-  await mkdir(getHarnessSessionEvidenceDir(rootDir, session.id), { recursive: true });
   await writeJsonFile(targetPath, session);
   return targetPath;
 }

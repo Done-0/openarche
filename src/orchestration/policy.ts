@@ -25,6 +25,14 @@ export async function evaluateHarnessPolicy(
   const punctuationCount = Array.from(normalizedPrompt.matchAll(/[^\p{L}\p{N}\s]/gu)).length;
   const lineCount = promptText.split('\n').map(line => line.trim()).filter(Boolean).length;
   const command = normalizedPrompt.match(/^\/[A-Za-z0-9:_-]+/)?.[0] ?? null;
+  const skillScaffoldPrompt =
+    normalizedPrompt.startsWith('Base directory for this skill:')
+    || (
+      normalizedPrompt.includes('## Overview')
+      && normalizedPrompt.includes('**Status**:')
+      && normalizedPrompt.includes('**Version**:')
+      && normalizedPrompt.includes('**Type**:')
+    );
   if (!config.orchestration.autoInject) {
     return {
       command,
@@ -65,6 +73,16 @@ export async function evaluateHarnessPolicy(
       reasons: ['The prompt stayed below the harness threshold, so only lightweight context is injected.'],
     };
   }
+  if (skillScaffoldPrompt) {
+    return {
+      command,
+      intent: 'analysis',
+      inject: true,
+      materialize: false,
+      mode: 'inject_only',
+      reasons: [...gate.reasons, 'Skill scaffold text should not materialize a persisted harness session before explicit execution starts.'],
+    };
+  }
 
   try {
     const prototypeCache = await loadPrototypeSection(config, 'policy', async () => ({
@@ -101,8 +119,7 @@ export async function evaluateHarnessPolicy(
     const structuralExecutionSignal =
       denseLength >= 160
       || punctuationCount >= 3
-      || lineCount >= 4
-      || gate.complexity === 'high';
+      || lineCount >= 4;
     if (intent === 'execute' && (score >= config.orchestration.materializeIntentThreshold || structuralExecutionSignal)) {
       return {
         command,
