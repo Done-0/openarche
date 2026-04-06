@@ -112,7 +112,11 @@ async function handleTranscriptBootstrap(
 
   for (const c of candidates) {
     if (!isValidCandidate(c, config.knowledge.extraction.minQualityScore)) continue;
-    const titleEmbedding = await embed(`${c.title} ${c.trigger_context}`, config);
+    const normalizedTitle = c.title.replace(/\s+/g, ' ').trim().slice(0, 200);
+    const normalizedTriggerContext = c.trigger_context.replace(/\s+/g, ' ').trim().slice(0, 400);
+    const normalizedTags = Array.from(new Set(c.tags.map(tag => tag.replace(/\s+/g, ' ').trim()).filter(Boolean))).slice(0, 16);
+    const normalizedBody = c.body.replace(/\r\n/g, '\n').trim();
+    const titleEmbedding = await embed(`${normalizedTitle} ${normalizedTriggerContext}`, config);
     const id = randomBytes(4).toString('hex');
     let persistedId: string | null = null;
     await mutateIndex(indexPath, async index => {
@@ -131,15 +135,15 @@ async function handleTranscriptBootstrap(
       persistedId = bestSim >= 0.85 && similar ? similar.id : id;
       const entry: KnowledgeEntry = {
         id: persistedId,
-        title: c.title,
+        title: normalizedTitle,
         type: c.type,
         structure: c.structure,
-        tags: c.tags,
+        tags: normalizedTags,
         links: bestSim >= 0.85 && similar ? similar.links : [],
         score: (c.quality_breakdown.reusability * 0.4 + c.quality_breakdown.non_obviousness * 0.3 + c.quality_breakdown.clarity * 0.2 + c.quality_breakdown.completeness * 0.1),
         access_count: bestSim >= 0.85 && similar ? similar.access_count : 0,
         source_project: bestSim >= 0.85 && similar ? similar.source_project : null,
-        trigger_context: c.trigger_context,
+        trigger_context: normalizedTriggerContext,
         quality: (c.quality_breakdown.reusability * 0.4 + c.quality_breakdown.non_obviousness * 0.3 + c.quality_breakdown.clarity * 0.2 + c.quality_breakdown.completeness * 0.1),
         quality_breakdown: c.quality_breakdown,
         created_at: bestSim >= 0.85 && similar ? similar.created_at : Date.now(),
@@ -152,17 +156,17 @@ async function handleTranscriptBootstrap(
         `id: ${entry.id}`,
         `type: ${entry.type}`,
         `structure: ${entry.structure}`,
-        `title: ${entry.title}`,
-        `trigger_context: ${entry.trigger_context}`,
-        `tags: [${entry.tags.join(', ')}]`,
-        `links: [${entry.links.join(', ')}]`,
+        `title: ${JSON.stringify(entry.title)}`,
+        `trigger_context: ${JSON.stringify(entry.trigger_context)}`,
+        `tags: ${JSON.stringify(entry.tags)}`,
+        `links: ${JSON.stringify(entry.links)}`,
         `score: ${entry.score}`,
         `quality: ${entry.quality}`,
-        `source: ${entry.source_project ?? 'null'}`,
+        `source: ${entry.source_project === null ? 'null' : JSON.stringify(entry.source_project)}`,
         `created: ${new Date(entry.created_at).toISOString().slice(0, 10)}`,
         '---',
         '',
-        c.body,
+        normalizedBody,
       ].join('\n'), 'utf8');
       if (bestSim >= 0.85 && similar) {
         const existingIndex = index.entries.findIndex(existing => existing.id === similar.id);
