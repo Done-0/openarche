@@ -37,6 +37,8 @@ OpenArche is a harness-first Claude Code plugin for non-trivial engineering work
 /openarche:setup
 ```
 
+If you use local embeddings, the first successful run may need network access to download the model files. If you prefer API-backed embeddings, switch to `remote` in `/openarche:config`.
+
 ## How It Works
 
 1. Use Claude Code as usual.
@@ -71,6 +73,8 @@ Config file:
 ```
 
 - `knowledge.embedding.provider`: `local` or `remote`
+- `knowledge.embedding.localModel`: used only when the provider is `local`
+- `knowledge.embedding.remoteModel`, `knowledge.embedding.remoteApiKey`, `knowledge.embedding.remoteBaseUrl`: used only when the provider is `remote`
 - `knowledge.retrieval`: recall threshold, recall fanout, and injection budget
 - `knowledge.extraction`: extraction model and capture concurrency
 - `execution`: isolation strategy and base ref

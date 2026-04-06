@@ -61,6 +61,7 @@ When editing:
 - If switching to `local`, remove remote-only embedding fields.
 - If switching to `remote`, remove `localModel` and require `remoteModel`, `remoteApiKey`, and `remoteBaseUrl`.
 - Keep the final file fully valid. Do not leave partial config.
+- If the user selects `local`, remind them that the first successful embedding call may need network access to download model files.
 
 After writing the file back:
 

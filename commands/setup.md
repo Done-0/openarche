@@ -76,6 +76,45 @@ console.log('Build complete');
 "
 ```
 
+After `dist/` is present, verify the embedding runtime when the current install will use local embeddings. Replace `PLUGIN_DIR` with the actual path:
+
+```bash
+node -e "
+const fs=require('fs'),path=require('path'),os=require('os');
+const {pathToFileURL}=require('url');
+const configPath=path.join(os.homedir(),'.claude','openarche','config.json');
+if(!fs.existsSync(configPath)){
+  console.log('SKIP_RUNTIME_CHECK');
+  process.exit(0);
+}
+const config=JSON.parse(fs.readFileSync(configPath,'utf8'));
+if(config.knowledge?.embedding?.provider!=='local'){
+  console.log('SKIP_RUNTIME_CHECK');
+  process.exit(0);
+}
+import(pathToFileURL(path.join('PLUGIN_DIR','dist','knowledge','embedding.js')).href).then(()=>{
+  console.log('RUNTIME_READY');
+}).catch(err=>{
+  console.error(String(err));
+  process.exit(1);
+});
+"
+```
+
+- If this check fails with a missing package or runtime error, do not describe it as a model download.
+- Install runtime dependencies in `PLUGIN_DIR` before continuing:
+
+```bash
+node -e "
+const {execSync}=require('child_process');
+execSync('npm install',{cwd:'PLUGIN_DIR',stdio:'inherit',shell:true});
+console.log('Runtime dependencies ready');
+"
+```
+
+- Re-run the runtime check after `npm install`.
+- If the runtime check still fails, tell the user the local embedding runtime is not ready and stop instead of pretending setup succeeded.
+
 ## Step 3: Initialize Data Directory
 
 ```bash
@@ -133,7 +172,7 @@ Promise.all([
 
 Tell the user the data directory is ready.
 
-Optionally pre-warm the local embedding model when the current config uses `provider: "local"` (replace `PLUGIN_DIR` with actual path):
+Optionally pre-warm the local embedding model when the current config uses `provider: "local"` and the runtime check already passed (replace `PLUGIN_DIR` with actual path):
 
 ```bash
 node -e "
@@ -157,6 +196,18 @@ import(pathToFileURL(embeddingPath).href).then(async mod=>{
 ```
 
 Tell the user a local embedding model download can happen on first use. Skip this message when the current config uses remote embeddings.
+
+If warm-up fails with `fetch failed` or another network error:
+
+- explain that the local model download could not reach the model host
+- tell the user they can retry with network access, or switch to remote embeddings through `/openarche:config`
+- do not describe this as a code or package failure
+
+If warm-up fails with a missing package or native module error:
+
+- explain that the local embedding runtime is incomplete or broken
+- re-run the `npm install` recovery step from Step 2
+- tell the user setup is not complete for local embeddings if the error still remains
 
 ## Step 4: Register Hooks And Status Line
 
@@ -281,4 +332,5 @@ If something is wrong, help the user check the setup result and hook registratio
 1. Re-run the path detection from Step 2, confirm `dist/` exists
 2. Run `node --version` to verify Node.js is accessible
 3. Re-run the `node -e` path command from Step 4, Read settings.json and confirm hooks are present
-4. Suggest re-running `/openarche:setup` if anything looks off
+4. If local embeddings are configured, re-run the runtime and warm-up checks from Step 2 and Step 3
+5. Suggest re-running `/openarche:setup` if anything looks off

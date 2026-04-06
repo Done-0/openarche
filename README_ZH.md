@@ -37,6 +37,8 @@ OpenArche 是一个面向 Claude Code 的 harness-first 工程插件，处理非
 /openarche:setup
 ```
 
+如果使用本地 embedding，首次成功运行时可能需要联网下载模型文件。如果你更希望走 API 方式，可以在 `/openarche:config` 里切到 `remote`。
+
 ## 工作方式
 
 1. 像平时一样向 Claude Code 提任务。
@@ -71,6 +73,8 @@ OpenArche 是一个面向 Claude Code 的 harness-first 工程插件，处理非
 ```
 
 - `knowledge.embedding.provider`：`local` 或 `remote`
+- `knowledge.embedding.localModel`：仅在 `local` 时使用
+- `knowledge.embedding.remoteModel`、`knowledge.embedding.remoteApiKey`、`knowledge.embedding.remoteBaseUrl`：仅在 `remote` 时使用
 - `knowledge.retrieval`：召回阈值、召回数量和注入预算
 - `knowledge.extraction`：提取模型和并发度
 - `execution`：隔离策略和基准分支
