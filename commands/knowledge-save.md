@@ -4,6 +4,8 @@ allowed-tools: Read, Write, Bash
 ---
 
 Use this command to save one explicit piece of reusable engineering knowledge into the local OpenArche store.
+For repository-specific work, prefer the repository-local store at `.openarche/knowledge/`.
+Use the global store only when the user is saving cross-project knowledge on purpose.
 
 What to save:
 
@@ -30,12 +32,12 @@ When writing a knowledge item, require these fields:
 
 When saving:
 
-1. Find the OpenArche data directory.
+1. Find the correct OpenArche data directory.
 2. Read and validate the current config.
 3. Load the current `index.json`.
 4. Build the embedding from the same recall text the product uses: `title + " " + trigger_context`.
 5. Create a new knowledge id unless the user is explicitly updating an existing item.
-6. Write the markdown file under `knowledge/<id>.md`.
+6. Write the markdown file under `<store>/knowledge/<id>.md`.
 7. Write the matching index entry.
 
 If the user is updating an existing knowledge item:

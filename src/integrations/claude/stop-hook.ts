@@ -1,19 +1,19 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { ensureAutoHarnessFlow } from '../../orchestration/auto-flow.js';
-import { evaluateHarnessCompletion, recordHarnessStageCompletion, synchronizeHarnessSession } from '../../orchestration/session.js';
-import { getLastHumanMessage } from './prompt-hook.js';
-import type { MaintenanceProtocol } from '../../contracts.js';
-import { loadState, saveState } from '../../state.js';
-import type { StdinData } from '../../types.js';
 import { loadConfig } from '../../config.js';
+import type { StdinData } from '../../types.js';
+import { mutateState } from '../../state.js';
 import { evaluateHarnessGateWithEmbeddings } from '../../orchestration/gates.js';
+import { ensureAutoHarnessFlow } from '../../orchestration/auto-flow.js';
 import { evaluateHarnessPolicy } from '../../orchestration/policy.js';
+import { getLastHumanMessage } from './prompt-hook.js';
+import { collectMechanicalReviewEvidence, refreshReviewProtocol } from '../../review/loop.js';
+import { evaluateHarnessCompletion, getHarnessSessionEvidenceDir, mutateHarnessSession, recordHarnessStageCompletion, synchronizeHarnessSession } from '../../orchestration/session.js';
+import { createTranscriptFingerprint, deleteCaptureLogEntry, markCaptureLogEntry } from '../../knowledge/capture-log.js';
 
 const BASE_DIR = join(homedir(), '.claude', 'openarche');
 const CAPTURE_LOG_PATH = join(BASE_DIR, 'capture-log.json');
@@ -31,9 +31,7 @@ async function main(): Promise<void> {
   try {
     transcript = await readFile(stdin.transcript_path, 'utf8');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw error;
-    }
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
   if (!transcript) return;
 
@@ -46,9 +44,7 @@ async function main(): Promise<void> {
       if (entry.message?.role !== 'assistant' || !Array.isArray(entry.message.content)) continue;
       for (const block of entry.message.content) {
         if (block.type !== 'tool_use' || typeof block.name !== 'string') continue;
-        if (block.name === 'Read' || block.name === 'Glob' || block.name === 'Grep' || block.name === 'LS' || block.name === 'Skill') {
-          continue;
-        }
+        if (block.name === 'Read' || block.name === 'Glob' || block.name === 'Grep' || block.name === 'LS' || block.name === 'Skill') continue;
         if (block.name === 'Bash') {
           const command = typeof block.input?.command === 'string' ? block.input.command.replace(/\s+/g, ' ').trim() : '';
           if (
@@ -73,17 +69,16 @@ async function main(): Promise<void> {
       continue;
     }
   }
+
   let autoFlow = null;
   if (promptText && stdin.cwd) {
     const config = await loadConfig(join(BASE_DIR, 'config.json'));
     const gate = await evaluateHarnessGateWithEmbeddings(promptText, config);
     const policy = await evaluateHarnessPolicy(promptText, config, gate);
-    autoFlow = await ensureAutoHarnessFlow(
-      BASE_DIR,
-      promptText,
-      stdin.cwd,
-      { materialize: policy.materialize || config.orchestration.persistAfterFirstToolUse && sawExecutionToolUse && gate.required, decision: policy }
-    );
+    autoFlow = await ensureAutoHarnessFlow(BASE_DIR, promptText, stdin.cwd, {
+      materialize: policy.materialize || config.orchestration.persistAfterFirstToolUse && sawExecutionToolUse && gate.required,
+      decision: policy,
+    });
   }
 
   if (stdin.cwd && autoFlow?.sessionId && sawExecutionToolUse) {
@@ -97,27 +92,33 @@ async function main(): Promise<void> {
   }
 
   if (stdin.cwd && autoFlow?.sessionId) {
-    const maintenancePath = join(stdin.cwd, '.openarche', `${autoFlow.sessionId}.maintenance.json`);
-    try {
-      const maintenance = JSON.parse(await readFile(maintenancePath, 'utf8')) as MaintenanceProtocol;
-      maintenance.spec.knowledgeCapture = process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY ? 'queued' : 'not_applicable';
-      maintenance.spec.knowledgeCaptureSummary =
-        maintenance.spec.knowledgeCapture === 'queued'
+    const repoRoot = stdin.cwd;
+    const sessionId = autoFlow.sessionId;
+    await mutateHarnessSession(repoRoot, sessionId, async session => {
+      session.runbook.maintenance.spec.knowledgeCapture = process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY ? 'queued' : 'not_applicable';
+      session.runbook.maintenance.spec.knowledgeCaptureSummary =
+        session.runbook.maintenance.spec.knowledgeCapture === 'queued'
           ? 'Knowledge capture has been queued for this task transcript.'
           : 'Knowledge capture is skipped because extraction credentials are not configured.';
-      maintenance.spec.followupsRecorded = true;
-      await writeFile(maintenancePath, JSON.stringify(maintenance, null, 2), 'utf8');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw error;
+      session.runbook.maintenance.spec.followupsRecorded = true;
+      if (sawExecutionToolUse) {
+        session.runbook.review = await collectMechanicalReviewEvidence(
+          repoRoot,
+          session.runbook.review,
+          getHarnessSessionEvidenceDir(repoRoot, sessionId)
+        );
+        session.runbook.review = refreshReviewProtocol(session.runbook.review, session.runbook.validation.ready);
       }
-    }
+    });
   }
 
   if (stdin.cwd && autoFlow?.sessionId) {
     const synchronized = await synchronizeHarnessSession(stdin.cwd, autoFlow.sessionId);
-    const state = await loadState(join(BASE_DIR, 'state.json'));
-    if (synchronized) {
+    await mutateState(join(BASE_DIR, 'state.json'), state => {
+      if (!synchronized) {
+        state.activeSession = null;
+        return;
+      }
       const completion = evaluateHarnessCompletion(synchronized);
       state.activeSession = completion.ready
         ? null
@@ -128,27 +129,39 @@ async function main(): Promise<void> {
             summary: `Harness opened. Remaining stages: ${completion.incompleteStages.join(', ')}.`,
             updatedAt: Date.now(),
           };
-      await saveState(join(BASE_DIR, 'state.json'), state);
-    }
+    });
   }
 
   const closeoutPath = fileURLToPath(new URL('../../orchestration/closeout-worker.js', import.meta.url));
+  const closeoutEntry = `closeout:${createTranscriptFingerprint(stdin.transcript_path)}`;
+  if (!(await markCaptureLogEntry(CAPTURE_LOG_PATH, closeoutEntry))) return;
   const tmpFile = join(tmpdir(), `openarche-closeout-${Date.now()}-${randomBytes(4).toString('hex')}.json`);
-  await writeFile(tmpFile, JSON.stringify({
-    transcriptPath: stdin.transcript_path,
-    transcript,
-    cwd: stdin.cwd ?? '',
-    baseDir: BASE_DIR,
-    processedPath: CAPTURE_LOG_PATH,
-    repoRoot: stdin.cwd,
-    sessionId: autoFlow?.sessionId ?? undefined,
-  }), 'utf8');
-  const child = spawn(process.execPath, [closeoutPath, tmpFile], {
-    detached: true,
-    stdio: 'ignore',
-    env: process.env,
-  });
-  child.unref();
+  try {
+    await writeFile(tmpFile, JSON.stringify({
+      transcriptPath: stdin.transcript_path,
+      transcript,
+      cwd: stdin.cwd ?? '',
+      baseDir: BASE_DIR,
+      processedPath: CAPTURE_LOG_PATH,
+      repoRoot: stdin.cwd,
+      sessionId: autoFlow?.sessionId ?? undefined,
+      closeoutEntry,
+    }), 'utf8');
+    const child = spawn(process.execPath, [closeoutPath, tmpFile], {
+      detached: true,
+      stdio: 'ignore',
+      env: process.env,
+    });
+    child.unref();
+  } catch (error) {
+    await deleteCaptureLogEntry(CAPTURE_LOG_PATH, closeoutEntry);
+    try {
+      await unlink(tmpFile);
+    } catch (unlinkError) {
+      if ((unlinkError as NodeJS.ErrnoException).code !== 'ENOENT') throw unlinkError;
+    }
+    throw error;
+  }
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

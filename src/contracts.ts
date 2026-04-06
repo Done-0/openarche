@@ -73,10 +73,14 @@ export interface BrowserJourney {
 
 export type HarnessCheckStatus = 'pending' | 'passed' | 'failed' | 'not_applicable';
 
+export type HarnessEvidenceKind = 'transcript' | 'command' | 'screenshot' | 'dom' | 'log' | 'metric' | 'note';
+
 export interface HarnessEvidence {
+  kind: HarnessEvidenceKind;
   summary: string;
   path: string | null;
   recordedAt: number;
+  metadata?: Record<string, string | number | boolean | null>;
 }
 
 export interface ValidationCheck {
@@ -166,6 +170,17 @@ export interface ReviewProtocol {
   automated: boolean;
   blockers: string[];
   loop: ReviewLoopSpec;
+  checks: Array<{
+    id: string;
+    kind: 'build' | 'lint' | 'test' | 'typecheck' | 'custom';
+    label: string;
+    command: string;
+    status: HarnessCheckStatus;
+    exitCode: number | null;
+    outputPath: string | null;
+    summary: string;
+    recordedAt: number | null;
+  }>;
 }
 
 export interface MaintenanceSpec {
@@ -195,14 +210,6 @@ export interface Runbook {
   automationNotes: string[];
 }
 
-export type HarnessArtifactKind = 'plan' | 'runbook' | 'validation' | 'review' | 'maintenance';
-
-export interface HarnessArtifact<TPayload> {
-  kind: HarnessArtifactKind;
-  fileName: string;
-  payload: TPayload;
-}
-
 export type HarnessComplexity = 'light' | 'moderate' | 'high';
 
 export interface HarnessGate {
@@ -223,16 +230,18 @@ export interface HarnessStageState {
 }
 
 export interface HarnessSession {
+  version: number;
   id: string;
   objective: string;
   complexity: HarnessComplexity;
   required: boolean;
   requiredStages: HarnessStageName[];
   automatedStages: HarnessStageName[];
-  artifactPaths: string[];
-  sessionFileName: string;
   repoRoot: string;
   updatedAt: number;
+  archivedAt: number | null;
+  archiveReason: 'completed' | 'stale' | null;
+  runbook: Runbook;
   stageStates: HarnessStageState[];
 }
 

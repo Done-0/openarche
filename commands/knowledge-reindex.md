@@ -9,14 +9,16 @@ Treat this as a full index rebuild, not a partial patch.
 
 Required behavior:
 
-1. Find the OpenArche data directory.
+1. Find the correct OpenArche knowledge store.
+   Reindex the repository-local store when the user is working inside a repository-specific knowledge base.
+   Reindex the global store when the user explicitly asks for the shared knowledge base.
 2. Read and validate the current config.
    If the config is invalid, stop and tell the user to fix `/openarche:config` first.
 3. Read the existing `index.json`.
    If the file is missing, treat it as an empty knowledge store.
    If the file exists but is invalid, stop and report that the index is corrupted.
 4. For every knowledge entry in the index:
-   - load the matching markdown file from `knowledge/<id>.md`
+   - load the matching markdown file from the same store as `index.json`
    - keep all metadata stable except the embedding vector
    - recompute the embedding from the same recall text used by the product: `title + " " + trigger_context`
 5. Write one rebuilt `index.json` with the updated embeddings.

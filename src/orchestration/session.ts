@@ -1,124 +1,105 @@
-import { mkdir, readFile, readdir, rmdir, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { HarnessBundle } from './harness-system.js';
 import { refreshMaintenanceSpec } from '../maintenance/sweep.js';
 import { refreshObservabilitySpec } from '../observability/queries.js';
-import { refreshReviewLoopSpec } from '../review/loop.js';
+import { refreshReviewProtocol } from '../review/loop.js';
 import { refreshBrowserValidationSpec } from '../validation/browser.js';
-import type { HarnessCompletion, HarnessSession, HarnessStageName, MaintenanceProtocol, ReviewProtocol, Runbook, ValidationProtocol } from '../contracts.js';
+import type { HarnessCompletion, HarnessSession, HarnessStageName } from '../contracts.js';
+import { mutateJsonFile, readJsonFile, writeJsonFile } from '../runtime/json-store.js';
 
-export function createHarnessSession(
-  bundle: HarnessBundle,
-  repoRoot: string,
-  artifactPaths: string[],
-  existingSession?: HarnessSession | null
-): HarnessSession {
+export function getHarnessRootDir(rootDir: string): string {
+  return join(rootDir, '.openarche');
+}
+
+export function getHarnessSessionsDir(rootDir: string): string {
+  return join(getHarnessRootDir(rootDir), 'sessions');
+}
+
+export function getHarnessSessionDir(rootDir: string, sessionId: string): string {
+  return join(getHarnessSessionsDir(rootDir), sessionId);
+}
+
+export function getHarnessSessionStatePath(rootDir: string, sessionId: string): string {
+  return join(getHarnessSessionDir(rootDir, sessionId), 'state.json');
+}
+
+export function getHarnessSessionEvidenceDir(rootDir: string, sessionId: string): string {
+  return join(getHarnessSessionDir(rootDir, sessionId), 'evidence');
+}
+
+function createStageStates(bundle: HarnessBundle, existingSession?: HarnessSession | null): HarnessSession['stageStates'] {
   const now = Date.now();
-  const session = existingSession
-    ? {
-        ...existingSession,
-        complexity: bundle.gate.complexity,
-        required: bundle.gate.required,
-        requiredStages: bundle.requiredStages,
-        automatedStages: bundle.automatedStages,
-        artifactPaths: artifactPaths.length > 0
-          ? Array.from(new Set([...existingSession.artifactPaths, ...artifactPaths]))
-          : existingSession.artifactPaths,
-        sessionFileName: `${bundle.runbook.plan.id}.session.json`,
-        repoRoot,
-        updatedAt: now,
-      }
-    : {
-        id: bundle.runbook.plan.id,
-        objective: bundle.runbook.plan.objective,
-        complexity: bundle.gate.complexity,
-        required: bundle.gate.required,
-        requiredStages: bundle.requiredStages,
-        automatedStages: bundle.automatedStages,
-        artifactPaths,
-        sessionFileName: `${bundle.runbook.plan.id}.session.json`,
-        repoRoot,
-        updatedAt: now,
-        stageStates: [],
-      };
-
-  const byStage: Record<HarnessStageName, string[]> = {
-    plan: [],
-    execute: [],
-    validate: [],
-    observe: [],
-    review: [],
-    maintain: [],
-  };
-  for (let index = 0; index < bundle.artifacts.length; index++) {
-    const path = artifactPaths[index];
-    if (!path) continue;
-    const kind = bundle.artifacts[index]?.kind;
-    if (kind === 'plan' || kind === 'runbook') byStage.plan.push(path);
-    if (kind === 'validation') byStage.validate.push(path);
-    if (kind === 'review') byStage.review.push(path);
-    if (kind === 'maintenance') byStage.maintain.push(path);
-  }
-
-  session.stageStates = [
+  const byName = new Map(existingSession?.stageStates.map(stage => [stage.name, stage]) ?? []);
+  return [
     {
       name: 'plan',
-      status: existingSession?.stageStates.find(stage => stage.name === 'plan')?.status ?? 'completed',
+      status: byName.get('plan')?.status ?? 'completed',
       updatedAt: now,
-      summary: existingSession?.stageStates.find(stage => stage.name === 'plan')?.summary ?? 'Plan and runbook artifacts are materialized.',
-      artifactPaths: Array.from(new Set([
-        ...(existingSession?.stageStates.find(stage => stage.name === 'plan')?.artifactPaths ?? []),
-        ...byStage.plan,
-      ])),
+      summary: byName.get('plan')?.summary ?? 'Plan and runbook state is recorded.',
+      artifactPaths: byName.get('plan')?.artifactPaths ?? [],
     },
     {
       name: 'execute',
-      status: existingSession?.stageStates.find(stage => stage.name === 'execute')?.status ?? 'pending',
+      status: byName.get('execute')?.status ?? 'pending',
       updatedAt: now,
-      summary: existingSession?.stageStates.find(stage => stage.name === 'execute')?.summary ?? 'Execution evidence has not been recorded yet.',
-      artifactPaths: existingSession?.stageStates.find(stage => stage.name === 'execute')?.artifactPaths ?? [],
+      summary: byName.get('execute')?.summary ?? 'Execution evidence has not been recorded yet.',
+      artifactPaths: byName.get('execute')?.artifactPaths ?? [],
     },
     {
       name: 'validate',
-      status: existingSession?.stageStates.find(stage => stage.name === 'validate')?.status ?? 'pending',
+      status: byName.get('validate')?.status ?? 'pending',
       updatedAt: now,
-      summary: existingSession?.stageStates.find(stage => stage.name === 'validate')?.summary ?? 'Validation evidence has not been recorded yet.',
-      artifactPaths: Array.from(new Set([
-        ...(existingSession?.stageStates.find(stage => stage.name === 'validate')?.artifactPaths ?? []),
-        ...byStage.validate,
-      ])),
+      summary: byName.get('validate')?.summary ?? 'Validation evidence has not been recorded yet.',
+      artifactPaths: byName.get('validate')?.artifactPaths ?? [],
     },
     {
       name: 'observe',
-      status: existingSession?.stageStates.find(stage => stage.name === 'observe')?.status ?? (bundle.requiredStages.includes('observe') ? 'pending' : 'completed'),
+      status: byName.get('observe')?.status ?? (bundle.requiredStages.includes('observe') ? 'pending' : 'completed'),
       updatedAt: now,
-      summary: existingSession?.stageStates.find(stage => stage.name === 'observe')?.summary
+      summary: byName.get('observe')?.summary
         ?? (bundle.requiredStages.includes('observe') ? 'Observability evidence has not been recorded yet.' : 'Observability is not required for this task.'),
-      artifactPaths: existingSession?.stageStates.find(stage => stage.name === 'observe')?.artifactPaths ?? [],
+      artifactPaths: byName.get('observe')?.artifactPaths ?? [],
     },
     {
       name: 'review',
-      status: existingSession?.stageStates.find(stage => stage.name === 'review')?.status ?? 'pending',
+      status: byName.get('review')?.status ?? 'pending',
       updatedAt: now,
-      summary: existingSession?.stageStates.find(stage => stage.name === 'review')?.summary ?? 'Review evidence has not been recorded yet.',
-      artifactPaths: Array.from(new Set([
-        ...(existingSession?.stageStates.find(stage => stage.name === 'review')?.artifactPaths ?? []),
-        ...byStage.review,
-      ])),
+      summary: byName.get('review')?.summary ?? 'Review evidence has not been recorded yet.',
+      artifactPaths: byName.get('review')?.artifactPaths ?? [],
     },
     {
       name: 'maintain',
-      status: existingSession?.stageStates.find(stage => stage.name === 'maintain')?.status ?? 'pending',
+      status: byName.get('maintain')?.status ?? 'pending',
       updatedAt: now,
-      summary: existingSession?.stageStates.find(stage => stage.name === 'maintain')?.summary ?? 'Maintenance follow-up has not been recorded yet.',
-      artifactPaths: Array.from(new Set([
-        ...(existingSession?.stageStates.find(stage => stage.name === 'maintain')?.artifactPaths ?? []),
-        ...byStage.maintain,
-      ])),
+      summary: byName.get('maintain')?.summary ?? 'Maintenance follow-up has not been recorded yet.',
+      artifactPaths: byName.get('maintain')?.artifactPaths ?? [],
     },
   ];
+}
 
-  return session;
+export function createHarnessSession(bundle: HarnessBundle, repoRoot: string, existingSession?: HarnessSession | null): HarnessSession {
+  const now = Date.now();
+  return {
+    version: (existingSession?.version ?? 0) + 1,
+    id: bundle.runbook.plan.id,
+    objective: bundle.runbook.plan.objective,
+    complexity: bundle.gate.complexity,
+    required: bundle.gate.required,
+    requiredStages: bundle.requiredStages,
+    automatedStages: bundle.automatedStages,
+    repoRoot,
+    updatedAt: now,
+    archivedAt: existingSession?.archivedAt ?? null,
+    archiveReason: existingSession?.archiveReason ?? null,
+    runbook: {
+      ...bundle.runbook,
+      validation: existingSession?.runbook.validation ?? bundle.runbook.validation,
+      review: existingSession?.runbook.review ?? bundle.runbook.review,
+      maintenance: existingSession?.runbook.maintenance ?? bundle.runbook.maintenance,
+    },
+    stageStates: createStageStates(bundle, existingSession),
+  };
 }
 
 export function evaluateHarnessCompletion(session: HarnessSession): HarnessCompletion {
@@ -133,23 +114,24 @@ export function evaluateHarnessCompletion(session: HarnessSession): HarnessCompl
 }
 
 export async function writeHarnessSession(rootDir: string, session: HarnessSession): Promise<string> {
-  const targetDir = join(rootDir, '.openarche');
-  await mkdir(targetDir, { recursive: true });
-  const targetPath = join(targetDir, session.sessionFileName);
-  await writeFile(targetPath, JSON.stringify(session, null, 2), 'utf8');
+  const targetPath = getHarnessSessionStatePath(rootDir, session.id);
+  await mkdir(getHarnessSessionEvidenceDir(rootDir, session.id), { recursive: true });
+  await writeJsonFile(targetPath, session);
   return targetPath;
 }
 
 export async function loadHarnessSession(rootDir: string, sessionId: string): Promise<HarnessSession | null> {
   try {
-    return JSON.parse(await readFile(join(rootDir, '.openarche', `${sessionId}.session.json`), 'utf8')) as HarnessSession;
+    return await readJsonFile(getHarnessSessionStatePath(rootDir, sessionId), () => {
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;
   }
 }
 
-export function refreshValidationProtocol(validation: ValidationProtocol): ValidationProtocol {
+export function refreshValidationProtocol(validation: HarnessSession['runbook']['validation']): HarnessSession['runbook']['validation'] {
   validation.browser = refreshBrowserValidationSpec(validation.browser);
   validation.observability = refreshObservabilitySpec(validation.observability);
   validation.blockers = [
@@ -163,101 +145,98 @@ export function refreshValidationProtocol(validation: ValidationProtocol): Valid
 }
 
 export async function synchronizeHarnessSession(rootDir: string, sessionId: string): Promise<HarnessSession | null> {
-  const session = await loadHarnessSession(rootDir, sessionId);
-  if (!session) return null;
-  const artifactDir = join(rootDir, '.openarche');
-  const now = Date.now();
-  let validation: ValidationProtocol | null = null;
-  let review: ReviewProtocol | null = null;
-  let maintenance: MaintenanceProtocol | null = null;
-  let runbook: Runbook | null = null;
-
   try {
-    validation = refreshValidationProtocol(JSON.parse(await readFile(join(artifactDir, `${sessionId}.validation.json`), 'utf8')) as ValidationProtocol);
-    await writeFile(join(artifactDir, `${sessionId}.validation.json`), JSON.stringify(validation, null, 2), 'utf8');
+    return await mutateJsonFile<HarnessSession, HarnessSession>(
+      getHarnessSessionStatePath(rootDir, sessionId),
+      (): HarnessSession => {
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      },
+      session => {
+        const now = Date.now();
+        const validation = refreshValidationProtocol(session.runbook.validation);
+        const review = refreshReviewProtocol(session.runbook.review, validation.ready);
+        session.runbook.maintenance.spec = refreshMaintenanceSpec(session.runbook.maintenance.spec);
+        session.runbook.validation = validation;
+        session.runbook.review = review;
+        session.updatedAt = now;
+        session.stageStates = session.stageStates.map(stage => {
+          const alreadyCompleted = stage.status === 'completed';
+          if (stage.name === 'plan') {
+            return { ...stage, status: 'completed', updatedAt: now, summary: 'Plan and runbook state is recorded.' };
+          }
+          if (stage.name === 'execute' && alreadyCompleted) {
+            return { ...stage, updatedAt: now, summary: stage.summary || `Execution session defined at ${session.runbook.worktree.sessionPath}.` };
+          }
+          if (stage.name === 'validate') {
+            const ready = validation.ready || alreadyCompleted;
+            return {
+              ...stage,
+              status: ready ? 'completed' : 'pending',
+              updatedAt: now,
+              summary: ready ? 'Validation evidence satisfies the protocol.' : validation.blockers.join(' '),
+            };
+          }
+          if (stage.name === 'observe') {
+            const ready = !session.requiredStages.includes('observe') || !!validation.observability?.ready || alreadyCompleted;
+            return {
+              ...stage,
+              status: ready ? 'completed' : 'pending',
+              updatedAt: now,
+              summary: ready ? 'Observability stage is satisfied.' : (validation.observability?.blockers.join(' ') ?? 'Observability evidence is still required.'),
+            };
+          }
+          if (stage.name === 'review') {
+            const ready = review.blockers.length === 0 || alreadyCompleted;
+            return {
+              ...stage,
+              status: ready ? 'completed' : 'pending',
+              updatedAt: now,
+              summary: ready ? 'Review gates are satisfied.' : review.blockers.join(' '),
+            };
+          }
+          if (stage.name === 'maintain') {
+            const ready = session.runbook.maintenance.spec.ready || alreadyCompleted;
+            return {
+              ...stage,
+              status: ready ? 'completed' : 'pending',
+              updatedAt: now,
+              summary: ready ? session.runbook.maintenance.spec.knowledgeCaptureSummary : session.runbook.maintenance.spec.blockers.join(' '),
+            };
+          }
+          return stage;
+        });
+        session.version += 1;
+        return session;
+      }
+    );
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
   }
+}
 
+export async function mutateHarnessSession<T>(
+  rootDir: string,
+  sessionId: string,
+  mutate: (session: HarnessSession) => Promise<T> | T
+): Promise<T | null> {
   try {
-    review = JSON.parse(await readFile(join(artifactDir, `${sessionId}.review.json`), 'utf8')) as ReviewProtocol;
-    review.loop = refreshReviewLoopSpec(review.loop, validation?.ready ?? false);
-    review.blockers = review.loop.blockers;
-    await writeFile(join(artifactDir, `${sessionId}.review.json`), JSON.stringify(review, null, 2), 'utf8');
+    return await mutateJsonFile<HarnessSession, T>(
+      getHarnessSessionStatePath(rootDir, sessionId),
+      (): HarnessSession => {
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      },
+      async session => {
+        const result = await mutate(session);
+        session.updatedAt = Date.now();
+        session.version += 1;
+        return result;
+      }
+    );
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
   }
-
-  try {
-    maintenance = JSON.parse(await readFile(join(artifactDir, `${sessionId}.maintenance.json`), 'utf8')) as MaintenanceProtocol;
-    maintenance.spec = refreshMaintenanceSpec(maintenance.spec);
-    await writeFile(join(artifactDir, `${sessionId}.maintenance.json`), JSON.stringify(maintenance, null, 2), 'utf8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
-
-  try {
-    runbook = JSON.parse(await readFile(join(artifactDir, `${sessionId}.runbook.json`), 'utf8')) as Runbook;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
-
-  session.updatedAt = now;
-  session.stageStates = session.stageStates.map(stage => {
-    const alreadyCompleted = stage.status === 'completed';
-    if (stage.name === 'plan') {
-      return {
-        ...stage,
-        status: 'completed',
-        updatedAt: now,
-        summary: 'Plan and runbook artifacts are materialized.',
-      };
-    }
-    if (stage.name === 'validate' && validation) {
-      return {
-        ...stage,
-        status: validation.ready || alreadyCompleted ? 'completed' : 'pending',
-        updatedAt: now,
-        summary: validation.ready || alreadyCompleted ? 'Validation evidence satisfies the protocol.' : validation.blockers.join(' '),
-      };
-    }
-    if (stage.name === 'observe') {
-      const observeRequired = session.requiredStages.includes('observe');
-      const observeReady = !observeRequired || !!validation?.observability?.ready;
-      return {
-        ...stage,
-        status: observeReady || alreadyCompleted ? 'completed' : 'pending',
-        updatedAt: now,
-        summary: observeReady || alreadyCompleted ? 'Observability stage is satisfied.' : (validation?.observability?.blockers.join(' ') ?? 'Observability evidence is still required.'),
-      };
-    }
-    if (stage.name === 'review' && review) {
-      return {
-        ...stage,
-        status: review.loop.ready || alreadyCompleted ? 'completed' : 'pending',
-        updatedAt: now,
-        summary: review.loop.ready || alreadyCompleted ? 'Review gates are satisfied.' : review.blockers.join(' '),
-      };
-    }
-    if (stage.name === 'maintain' && maintenance) {
-      return {
-        ...stage,
-        status: maintenance.spec.ready || alreadyCompleted ? 'completed' : 'pending',
-        updatedAt: now,
-        summary: maintenance.spec.ready || alreadyCompleted ? maintenance.spec.knowledgeCaptureSummary : maintenance.spec.blockers.join(' '),
-      };
-    }
-    if (stage.name === 'execute' && runbook && stage.status === 'completed') {
-      return {
-        ...stage,
-        updatedAt: now,
-        summary: stage.summary || `Execution session defined at ${runbook.worktree.sessionPath}.`,
-      };
-    }
-    return stage;
-  });
-  await writeHarnessSession(rootDir, session);
-  return session;
 }
 
 export async function recordHarnessStageCompletion(
@@ -267,60 +246,60 @@ export async function recordHarnessStageCompletion(
   summary: string,
   artifactPaths: string[] = []
 ): Promise<HarnessSession | null> {
-  const session = await loadHarnessSession(rootDir, sessionId);
-  if (!session) return null;
-  const now = Date.now();
-  session.updatedAt = now;
-  session.stageStates = session.stageStates.map(stage => stage.name !== stageName
-    ? stage
-    : {
-        ...stage,
-        status: 'completed',
-        updatedAt: now,
-        summary,
-        artifactPaths: Array.from(new Set([...stage.artifactPaths, ...artifactPaths])),
-      });
-  await writeHarnessSession(rootDir, session);
-  return session;
+  const updated = await mutateHarnessSession(rootDir, sessionId, session => {
+    const now = Date.now();
+    session.stageStates = session.stageStates.map(stage => stage.name !== stageName
+      ? stage
+      : {
+          ...stage,
+          status: 'completed',
+          updatedAt: now,
+          summary,
+          artifactPaths: Array.from(new Set([...stage.artifactPaths, ...artifactPaths])),
+        });
+    return session;
+  });
+  return updated ? synchronizeHarnessSession(rootDir, sessionId) : null;
 }
 
 export async function cleanupHarnessSessions(rootDir: string): Promise<void> {
-  const artifactDir = join(rootDir, '.openarche');
-  let files: string[] = [];
+  let sessionDirs: string[] = [];
   try {
-    files = await readdir(artifactDir);
+    sessionDirs = await readdir(getHarnessSessionsDir(rootDir));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
     throw error;
   }
   const now = Date.now();
-  const closed: Array<{ id: string; updatedAt: number }> = [];
-  for (const file of files) {
-    if (!file.endsWith('.session.json')) continue;
-    const id = file.slice(0, -'.session.json'.length);
-    const session = await loadHarnessSession(rootDir, id);
+  for (const sessionId of sessionDirs) {
+    const session = await loadHarnessSession(rootDir, sessionId);
     if (!session) continue;
-    if (evaluateHarnessCompletion(session).ready) {
-      closed.push({ id, updatedAt: session.updatedAt });
+    const completion = evaluateHarnessCompletion(session);
+    const age = now - session.updatedAt;
+    let archiveReason: HarnessSession['archiveReason'] = null;
+    if (completion.ready && age > 24 * 60 * 60 * 1000) {
+      archiveReason = 'completed';
+    } else if (!completion.ready && age > 7 * 24 * 60 * 60 * 1000) {
+      archiveReason = 'stale';
     }
-  }
-  closed.sort((a, b) => b.updatedAt - a.updatedAt);
-  for (let index = 0; index < closed.length; index++) {
-    const session = closed[index];
-    if (index < 3 && now - session.updatedAt < 24 * 60 * 60 * 1000) continue;
-    for (const suffix of ['plan.json', 'runbook.json', 'validation.json', 'review.json', 'maintenance.json', 'session.json']) {
-      try {
-        await unlink(join(artifactDir, `${session.id}.${suffix}`));
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
+    if (!archiveReason) continue;
+    session.archivedAt = now;
+    session.archiveReason = archiveReason;
+    session.version += 1;
+    await writeHarnessSession(rootDir, session);
+    let archiveDir = archiveReason === 'completed'
+      ? join(getHarnessRootDir(rootDir), 'completed', sessionId)
+      : join(getHarnessRootDir(rootDir), 'completed', 'stale', sessionId);
+    try {
+      await mkdir(join(archiveDir, '..'), { recursive: true });
+      await rename(getHarnessSessionDir(rootDir, sessionId), archiveDir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST' && (error as NodeJS.ErrnoException).code !== 'ENOTEMPTY') throw error;
+      archiveDir = archiveReason === 'completed'
+        ? join(getHarnessRootDir(rootDir), 'completed', `${sessionId}-${now}`)
+        : join(getHarnessRootDir(rootDir), 'completed', 'stale', `${sessionId}-${now}`);
+      await mkdir(join(archiveDir, '..'), { recursive: true });
+      await rename(getHarnessSessionDir(rootDir, sessionId), archiveDir);
     }
-  }
-  try {
-    if ((await readdir(artifactDir)).length === 0) {
-      await rmdir(artifactDir);
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
 }

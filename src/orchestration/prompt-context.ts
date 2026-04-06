@@ -2,15 +2,15 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { loadConfig } from '../config.js';
 import { createProductManifest } from '../product/manifest.js';
-import { loadState, saveState } from '../state.js';
+import { mutateState } from '../state.js';
 import { loadIndex, mutateIndex } from '../knowledge/index-store.js';
 import { embed } from '../knowledge/embedding.js';
+import { getGlobalKnowledgeStorePaths, getRepoKnowledgeStorePaths } from '../knowledge/paths.js';
 import { retrieve } from '../knowledge/search.js';
 import { ensureAutoHarnessFlow } from './auto-flow.js';
-import { escapeXml } from './context-xml.js';
+import { escapeXml, formatContextXml } from './context-xml.js';
 import { evaluateHarnessGateWithEmbeddings } from './gates.js';
 import { evaluateHarnessPolicy } from './policy.js';
-import { formatContextXml } from './context-xml.js';
 import { evaluateHarnessCompletion, synchronizeHarnessSession } from './session.js';
 
 export interface PromptContextRequest {
@@ -20,10 +20,10 @@ export interface PromptContextRequest {
 }
 
 export async function buildPromptContext(request: PromptContextRequest): Promise<string | null> {
-  const indexPath = join(request.baseDir, 'index.json');
+  const globalStore = getGlobalKnowledgeStorePaths(request.baseDir);
+  const repoStore = request.cwd ? getRepoKnowledgeStorePaths(request.cwd) : null;
   const statePath = join(request.baseDir, 'state.json');
   const configPath = join(request.baseDir, 'config.json');
-  const knowledgeDir = join(request.baseDir, 'knowledge');
 
   const config = await loadConfig(configPath);
   const manifest = createProductManifest('workspace');
@@ -42,11 +42,14 @@ export async function buildPromptContext(request: PromptContextRequest): Promise
   const autoFlow = await ensureAutoHarnessFlow(request.baseDir, request.promptText, request.cwd, { materialize: policy.materialize, decision: policy });
   if (request.cwd && autoFlow?.sessionId) {
     const synchronized = await synchronizeHarnessSession(request.cwd, autoFlow.sessionId);
-    if (synchronized) {
-      autoFlow.completion = evaluateHarnessCompletion(synchronized);
-    }
+    if (synchronized) autoFlow.completion = evaluateHarnessCompletion(synchronized);
   }
-  const index = await loadIndex(indexPath);
+  const globalIndex = await loadIndex(globalStore.indexPath);
+  const repoIndex = repoStore ? await loadIndex(repoStore.indexPath).catch(() => ({ version: 1 as const, entries: [] })) : { version: 1 as const, entries: [] };
+  const index = {
+    version: 1 as const,
+    entries: [...repoIndex.entries, ...globalIndex.entries.filter(entry => !repoIndex.entries.some(repoEntry => repoEntry.id === entry.id))],
+  };
   const capabilityXml = Object.values(manifest.capabilities).map(capability =>
     `  <capability name="${escapeXml(capability.name)}" enabled="${capability.enabled}" maturity="${escapeXml(capability.maturity)}" required_for="${escapeXml(capability.requiredFor.join(','))}" evidence_driven="${capability.evidenceDriven}" automated_by_default="${capability.automatedByDefault}">${escapeXml(`${capability.summary} Responsibilities: ${capability.responsibilities.join(' ')}`)}</capability>`
   ).join('\n');
@@ -99,49 +102,41 @@ export async function buildPromptContext(request: PromptContextRequest): Promise
         : 'No active harness session is required for this prompt.'
     )}</session>`;
   const baseContext = `<openarche_context>\n<capabilities readiness="${readiness.toFixed(2)}">\n${capabilityXml}\n</capabilities>\n<harness_policy mode="required">\n${policyXml}\n${gateXml}\n${sessionXml}\n</harness_policy>\n<workflow>\n${workflowXml}\n</workflow>\n</openarche_context>`;
-  const state = await loadState(statePath);
-  state.activeSession = autoFlow?.sessionId && autoFlow.completion
-    ? {
-        id: autoFlow.sessionId,
-        complexity: autoFlow.complexity,
-        incompleteStages: autoFlow.completion.incompleteStages,
-        summary: autoFlow.completion.ready
-          ? 'All required harness gates are closed.'
-          : `Harness opened. Remaining stages: ${autoFlow.completion.incompleteStages.join(', ')}.`,
-        updatedAt: Date.now(),
-      }
-    : null;
-  if (index.entries.length === 0) {
-    await saveState(statePath, state);
-    return baseContext;
-  }
+
+  await mutateState(statePath, state => {
+    state.activeSession = autoFlow?.sessionId && autoFlow.completion
+      ? {
+          id: autoFlow.sessionId,
+          complexity: autoFlow.complexity,
+          incompleteStages: autoFlow.completion.incompleteStages,
+          summary: autoFlow.completion.ready ? 'All required harness gates are closed.' : `Harness opened. Remaining stages: ${autoFlow.completion.incompleteStages.join(', ')}.`,
+          updatedAt: Date.now(),
+        }
+      : null;
+  });
+  if (index.entries.length === 0) return baseContext;
 
   let results;
   try {
     const queryEmbedding = await embed(request.promptText, config);
-    results = await Promise.resolve(
-      retrieve(
-        index,
-        queryEmbedding,
-        config.knowledge.retrieval.threshold,
-        config.knowledge.retrieval.topK,
-        request.cwd
-      )
-    );
+    results = await Promise.resolve(retrieve(index, queryEmbedding, config.knowledge.retrieval.threshold, config.knowledge.retrieval.topK, request.cwd));
   } catch {
-    await saveState(statePath, state);
     return baseContext;
   }
-  if (results.length === 0) {
-    await saveState(statePath, state);
-    return baseContext;
-  }
+  if (results.length === 0) return baseContext;
 
   const bodyMap = new Map<string, string>();
+  const knowledgeDirById = new Map<string, string>();
+  for (const entry of repoIndex.entries) {
+    if (repoStore) knowledgeDirById.set(entry.id, repoStore.knowledgeDir);
+  }
+  for (const entry of globalIndex.entries) {
+    if (!knowledgeDirById.has(entry.id)) knowledgeDirById.set(entry.id, globalStore.knowledgeDir);
+  }
   let totalChars = 0;
   for (const result of results) {
     try {
-      const body = await readFile(join(knowledgeDir, `${result.entry.id}.md`), 'utf8');
+      const body = await readFile(join(knowledgeDirById.get(result.entry.id) ?? globalStore.knowledgeDir, `${result.entry.id}.md`), 'utf8');
       const bodyOnly = body.split('---\n').slice(2).join('---\n').trim();
       if (totalChars + bodyOnly.length > config.knowledge.retrieval.maxInjectChars) break;
       bodyMap.set(result.entry.id, bodyOnly);
@@ -152,16 +147,26 @@ export async function buildPromptContext(request: PromptContextRequest): Promise
   }
 
   const filtered = results.filter(result => bodyMap.has(result.entry.id));
-  if (filtered.length === 0) {
-    await saveState(statePath, state);
-    return baseContext;
-  }
+  if (filtered.length === 0) return baseContext;
 
-  state.lastRecall = { count: filtered.length, at: Date.now(), titles: filtered.map(result => result.entry.title) };
-  await saveState(statePath, state);
+  await mutateState(statePath, state => {
+    state.lastRecall = { count: filtered.length, at: Date.now(), titles: filtered.map(result => result.entry.title) };
+  });
 
   const now = Date.now();
-  await mutateIndex(indexPath, freshIndex => {
+  if (repoStore && filtered.some(result => repoIndex.entries.some(entry => entry.id === result.entry.id))) {
+    await mutateIndex(repoStore.indexPath, freshIndex => {
+      for (const result of filtered) {
+        const entryIndex = freshIndex.entries.findIndex(entry => entry.id === result.entry.id);
+        if (entryIndex >= 0) {
+          freshIndex.entries[entryIndex].access_count += 1;
+          freshIndex.entries[entryIndex].last_accessed = now;
+          freshIndex.entries[entryIndex].score = Math.min(5.0, freshIndex.entries[entryIndex].score + 0.1);
+        }
+      }
+    });
+  }
+  await mutateIndex(globalStore.indexPath, freshIndex => {
     for (const result of filtered) {
       const entryIndex = freshIndex.entries.findIndex(entry => entry.id === result.entry.id);
       if (entryIndex >= 0) {

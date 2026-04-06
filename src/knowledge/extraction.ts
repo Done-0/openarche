@@ -3,11 +3,13 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../config.js';
-import { loadState, saveState } from '../state.js';
+import { mutateState } from '../state.js';
 import { loadIndex, mutateIndex } from './index-store.js';
 import { embed, cosineSimilarity } from './embedding.js';
 import { buildLinks, matchLinksHints } from './graph.js';
 import { EXTRACTION_SYSTEM_PROMPT } from './extraction-prompt.js';
+import { createTranscriptFingerprint, markCaptureLogEntry } from './capture-log.js';
+import { getGlobalKnowledgeStorePaths, getRepoKnowledgeStorePaths } from './paths.js';
 import type { KnowledgeEntry, ProductConfig } from '../types.js';
 
 export interface ExtractionCandidate {
@@ -29,6 +31,7 @@ export interface TempPayload {
   processedPath: string;
   repoRoot?: string;
   sessionId?: string;
+  closeoutEntry?: string;
 }
 
 export function parseExtractionResult(raw: string): ExtractionCandidate[] {
@@ -153,9 +156,9 @@ async function main(): Promise<void> {
 export async function extractKnowledgeFromPayload(payload: TempPayload): Promise<{ status: 'captured' | 'not_applicable'; extracted: number }> {
   const { transcriptPath, transcript, cwd, baseDir, processedPath } = payload;
   const configPath = join(baseDir, 'config.json');
-  const indexPath = join(baseDir, 'index.json');
   const statePath = join(baseDir, 'state.json');
-  const knowledgeDir = join(baseDir, 'knowledge');
+  const store = payload.repoRoot ? getRepoKnowledgeStorePaths(payload.repoRoot) : getGlobalKnowledgeStorePaths(baseDir);
+  const globalStore = getGlobalKnowledgeStorePaths(baseDir);
 
   const config = await loadConfig(configPath);
   if (!process.env.ANTHROPIC_AUTH_TOKEN && !process.env.ANTHROPIC_API_KEY) {
@@ -177,7 +180,7 @@ export async function extractKnowledgeFromPayload(payload: TempPayload): Promise
 
     const id = randomBytes(4).toString('hex');
     let persistedId: string | null = null;
-    await mutateIndex(indexPath, async index => {
+    await mutateIndex(store.indexPath, async index => {
       let similar: KnowledgeEntry | undefined;
       let bestSim = 0;
       for (const existing of index.entries) {
@@ -208,8 +211,8 @@ export async function extractKnowledgeFromPayload(payload: TempPayload): Promise
         last_accessed: bestSim >= 0.85 && similar ? similar.last_accessed : null,
         embedding: titleEmbedding,
       };
-      await mkdir(knowledgeDir, { recursive: true });
-      await writeFile(join(knowledgeDir, `${persistedId}.md`), [
+      await mkdir(store.knowledgeDir, { recursive: true });
+      await writeFile(join(store.knowledgeDir, `${persistedId}.md`), [
         '---',
         `id: ${entry.id}`,
         `type: ${entry.type}`,
@@ -243,29 +246,17 @@ export async function extractKnowledgeFromPayload(payload: TempPayload): Promise
       const hintEmbeddings = await Promise.all(
         c.links_hint.map(h => embed(h, config))
       );
-      await mutateIndex(indexPath, freshIndex => {
+      await mutateIndex(store.indexPath, freshIndex => {
         const linkedIds = matchLinksHints(freshIndex, hintEmbeddings, 0.80);
         buildLinks(freshIndex, linkedSourceId, linkedIds.filter(lid => lid !== linkedSourceId));
       });
     }
   }
 
-  const state = await loadState(statePath);
-  state.knowledgeCount = (await loadIndex(indexPath)).entries.length;
-  await saveState(statePath, state);
-
-  let processed: string[] = [];
-  try {
-    processed = JSON.parse(await readFile(processedPath, 'utf8')) as string[];
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw error;
-    }
-  }
-  if (!processed.includes(transcriptPath)) {
-    processed.push(transcriptPath);
-    await writeFile(processedPath, JSON.stringify(processed, null, 2), 'utf8');
-  }
+  await mutateState(statePath, async state => {
+    state.knowledgeCount = (await loadIndex(globalStore.indexPath)).entries.length;
+  });
+  await markCaptureLogEntry(processedPath, createTranscriptFingerprint(transcriptPath));
   return { status: 'captured', extracted };
 }
 

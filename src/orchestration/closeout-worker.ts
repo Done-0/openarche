@@ -1,9 +1,8 @@
-import { readFile, unlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readFile, unlink } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { deleteCaptureLogEntry } from '../knowledge/capture-log.js';
 import { extractKnowledgeFromPayload, type TempPayload } from '../knowledge/extraction.js';
-import type { MaintenanceProtocol } from '../contracts.js';
-import { cleanupHarnessSessions, synchronizeHarnessSession } from './session.js';
+import { cleanupHarnessSessions, mutateHarnessSession, synchronizeHarnessSession } from './session.js';
 
 async function main(): Promise<void> {
   const tmpFile = process.argv[2];
@@ -13,11 +12,9 @@ async function main(): Promise<void> {
   try {
     await unlink(tmpFile);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw error;
-    }
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
-  let knowledgeCapture: MaintenanceProtocol['spec']['knowledgeCapture'] = 'failed';
+  let knowledgeCapture: 'captured' | 'not_applicable' | 'failed' = 'failed';
   let knowledgeCaptureSummary = 'Knowledge capture failed before completion.';
   try {
     const result = await extractKnowledgeFromPayload(payload);
@@ -28,26 +25,21 @@ async function main(): Promise<void> {
           ? `Knowledge capture finished with ${result.extracted} reusable item${result.extracted === 1 ? '' : 's'}.`
           : 'Knowledge capture finished and found no reusable item.'
         : 'Knowledge capture was skipped because extraction credentials are not configured.';
+    if (result.status === 'not_applicable' && payload.closeoutEntry) {
+      await deleteCaptureLogEntry(payload.processedPath, payload.closeoutEntry);
+    }
   } catch (error) {
-    knowledgeCapture = 'failed';
     knowledgeCaptureSummary = `Knowledge capture failed: ${error instanceof Error ? error.message : String(error)}`;
+    if (payload.closeoutEntry) await deleteCaptureLogEntry(payload.processedPath, payload.closeoutEntry);
   }
 
   if (!payload.repoRoot || !payload.sessionId) return;
-
-  const maintenancePath = join(payload.repoRoot, '.openarche', `${payload.sessionId}.maintenance.json`);
-  try {
-    const maintenance = JSON.parse(await readFile(maintenancePath, 'utf8')) as MaintenanceProtocol;
-    maintenance.spec.knowledgeCapture = knowledgeCapture;
-    maintenance.spec.knowledgeCaptureSummary = knowledgeCaptureSummary;
-    maintenance.spec.followupsRecorded = true;
-    await writeFile(maintenancePath, JSON.stringify(maintenance, null, 2), 'utf8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw error;
-    }
-    process.stderr.write(`Missing maintenance artifact for harness session ${payload.sessionId}.`);
-  }
+  const updated = await mutateHarnessSession(payload.repoRoot, payload.sessionId, session => {
+    session.runbook.maintenance.spec.knowledgeCapture = knowledgeCapture;
+    session.runbook.maintenance.spec.knowledgeCaptureSummary = knowledgeCaptureSummary;
+    session.runbook.maintenance.spec.followupsRecorded = true;
+  });
+  if (updated === null) process.stderr.write(`Missing maintenance artifact for harness session ${payload.sessionId}.`);
 
   await synchronizeHarnessSession(payload.repoRoot, payload.sessionId);
   await cleanupHarnessSessions(payload.repoRoot);

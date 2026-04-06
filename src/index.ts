@@ -7,7 +7,6 @@ export * from './observability/queries.js';
 export * from './review/loop.js';
 export * from './maintenance/sweep.js';
 export * from './orchestration/runbook.js';
-export * from './orchestration/artifact-writer.js';
 export * from './orchestration/gates.js';
 export * from './orchestration/harness-system.js';
 export * from './orchestration/auto-flow.js';

@@ -1,3 +1,8 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+import type { ReviewProtocol } from '../contracts.js';
 import type { ReviewLoopSpec } from '../contracts.js';
 import type { ProductConfig } from '../types.js';
 
@@ -49,6 +54,49 @@ export function createReviewLoopSpec(config: ProductConfig): ReviewLoopSpec {
   };
 }
 
+export function discoverMechanicalChecks(repoRoot: string): ReviewProtocol['checks'] {
+  const checks: ReviewProtocol['checks'] = [];
+  const packageJsonPath = join(repoRoot, 'package.json');
+  if (existsSync(packageJsonPath)) {
+    try {
+      const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { scripts?: Record<string, string> };
+      if (packageJson.scripts?.build) {
+        checks.push({ id: 'build', kind: 'build', label: 'Build', command: 'npm run build', status: 'pending', exitCode: null, outputPath: null, summary: 'Build check has not run yet.', recordedAt: null });
+      }
+      if (packageJson.scripts?.lint) {
+        checks.push({ id: 'lint', kind: 'lint', label: 'Lint', command: 'npm run lint', status: 'pending', exitCode: null, outputPath: null, summary: 'Lint check has not run yet.', recordedAt: null });
+      }
+      if (packageJson.scripts?.test) {
+        checks.push({ id: 'test', kind: 'test', label: 'Test', command: 'npm test', status: 'pending', exitCode: null, outputPath: null, summary: 'Test check has not run yet.', recordedAt: null });
+      }
+      if (packageJson.scripts?.typecheck) {
+        checks.push({ id: 'typecheck', kind: 'typecheck', label: 'Typecheck', command: 'npm run typecheck', status: 'pending', exitCode: null, outputPath: null, summary: 'Typecheck has not run yet.', recordedAt: null });
+      }
+    } catch {
+      checks.push({ id: 'package-json-invalid', kind: 'custom', label: 'Package manifest', command: 'package.json parse', status: 'failed', exitCode: null, outputPath: null, summary: 'package.json could not be parsed for automatic review discovery.', recordedAt: Date.now() });
+    }
+  }
+  if (existsSync(join(repoRoot, 'Cargo.toml'))) {
+    if (!checks.some(check => check.kind === 'build')) checks.push({ id: 'cargo-build', kind: 'build', label: 'Cargo build', command: 'cargo build', status: 'pending', exitCode: null, outputPath: null, summary: 'Cargo build has not run yet.', recordedAt: null });
+    if (!checks.some(check => check.kind === 'test')) checks.push({ id: 'cargo-test', kind: 'test', label: 'Cargo test', command: 'cargo test', status: 'pending', exitCode: null, outputPath: null, summary: 'Cargo test has not run yet.', recordedAt: null });
+    if (!checks.some(check => check.kind === 'lint')) checks.push({ id: 'cargo-clippy', kind: 'lint', label: 'Cargo clippy', command: 'cargo clippy --all-targets --all-features', status: 'pending', exitCode: null, outputPath: null, summary: 'Cargo clippy has not run yet.', recordedAt: null });
+  }
+  if (existsSync(join(repoRoot, 'go.mod'))) {
+    if (!checks.some(check => check.kind === 'build')) checks.push({ id: 'go-build', kind: 'build', label: 'Go build', command: 'go build ./...', status: 'pending', exitCode: null, outputPath: null, summary: 'Go build has not run yet.', recordedAt: null });
+    if (!checks.some(check => check.kind === 'test')) checks.push({ id: 'go-test', kind: 'test', label: 'Go test', command: 'go test ./...', status: 'pending', exitCode: null, outputPath: null, summary: 'Go test has not run yet.', recordedAt: null });
+  }
+  if (existsSync(join(repoRoot, 'pyproject.toml')) || existsSync(join(repoRoot, 'pytest.ini'))) {
+    if (!checks.some(check => check.kind === 'test')) checks.push({ id: 'pytest', kind: 'test', label: 'Pytest', command: 'python -m pytest', status: 'pending', exitCode: null, outputPath: null, summary: 'Pytest has not run yet.', recordedAt: null });
+  }
+  if (existsSync(join(repoRoot, 'pyproject.toml')) || existsSync(join(repoRoot, 'ruff.toml'))) {
+    if (!checks.some(check => check.kind === 'lint')) checks.push({ id: 'ruff', kind: 'lint', label: 'Ruff', command: 'python -m ruff check .', status: 'pending', exitCode: null, outputPath: null, summary: 'Ruff has not run yet.', recordedAt: null });
+  }
+  if (existsSync(join(repoRoot, 'pyproject.toml')) || existsSync(join(repoRoot, 'mypy.ini')) || existsSync(join(repoRoot, '.mypy.ini'))) {
+    if (!checks.some(check => check.kind === 'typecheck')) checks.push({ id: 'mypy', kind: 'typecheck', label: 'Mypy', command: 'python -m mypy .', status: 'pending', exitCode: null, outputPath: null, summary: 'Mypy has not run yet.', recordedAt: null });
+  }
+  return checks;
+}
+
 export function refreshReviewLoopSpec(spec: ReviewLoopSpec, validationReady: boolean): ReviewLoopSpec {
   spec.mergeChecks = spec.mergeChecks.map(check => {
     if (check.id === 'validation') {
@@ -81,6 +129,64 @@ export function refreshReviewLoopSpec(spec: ReviewLoopSpec, validationReady: boo
   spec.ready = spec.blockers.length === 0;
   spec.state.mergeReady = spec.ready;
   return spec;
+}
+
+export function refreshReviewProtocol(review: ReviewProtocol, validationReady: boolean): ReviewProtocol {
+  const actionableChecks = review.checks.filter(check => check.status !== 'not_applicable');
+  if (actionableChecks.length === 0 || actionableChecks.every(check => check.status === 'passed')) {
+    review.loop.state.buildFailuresResolved = 'passed';
+  } else if (actionableChecks.some(check => check.status === 'failed')) {
+    review.loop.state.buildFailuresResolved = 'failed';
+  } else {
+    review.loop.state.buildFailuresResolved = 'pending';
+  }
+  review.loop = refreshReviewLoopSpec(review.loop, validationReady);
+  review.blockers = [
+    ...review.loop.blockers,
+    ...review.checks
+      .filter(check => check.status === 'failed' || check.status === 'pending')
+      .map(check => check.summary),
+  ];
+  return review;
+}
+
+export async function collectMechanicalReviewEvidence(
+  repoRoot: string,
+  review: ReviewProtocol,
+  evidenceDir: string
+): Promise<ReviewProtocol> {
+  await mkdir(evidenceDir, { recursive: true });
+  for (const check of review.checks) {
+    if (check.status === 'not_applicable') continue;
+    const outputPath = join(evidenceDir, `${check.id}.txt`);
+    const startedAt = Date.now();
+    const result = await new Promise<{ exitCode: number | null; output: string }>((resolve, reject) => {
+      const child = spawn('sh', ['-lc', check.command], { cwd: repoRoot, env: process.env });
+      const chunks: Buffer[] = [];
+      const timeout = setTimeout(() => {
+        child.kill('SIGTERM');
+      }, 120000);
+      child.stdout.on('data', chunk => chunks.push(Buffer.from(chunk)));
+      child.stderr.on('data', chunk => chunks.push(Buffer.from(chunk)));
+      child.on('error', error => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+      child.on('close', exitCode => {
+        clearTimeout(timeout);
+        resolve({ exitCode, output: Buffer.concat(chunks).toString('utf8').slice(0, 20000) });
+      });
+    }).catch(error => ({ exitCode: null, output: error instanceof Error ? error.message : String(error) }));
+    await writeFile(outputPath, result.output, 'utf8');
+    check.exitCode = result.exitCode;
+    check.outputPath = outputPath;
+    check.recordedAt = startedAt;
+    check.status = result.exitCode === 0 ? 'passed' : 'failed';
+    check.summary = result.exitCode === 0
+      ? `${check.label} passed.`
+      : `${check.label} failed${result.exitCode === null ? '' : ` with exit code ${result.exitCode}`}.`;
+  }
+  return review;
 }
 
 export function recordReviewOutcome(

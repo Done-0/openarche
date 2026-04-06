@@ -1,7 +1,7 @@
 import { createBrowserValidationSpec } from '../validation/browser.js';
 import { createMaintenanceSpec, refreshMaintenanceSpec } from '../maintenance/sweep.js';
 import { createObservabilitySpec, refreshObservabilitySpec } from '../observability/queries.js';
-import { createReviewLoopSpec, refreshReviewLoopSpec } from '../review/loop.js';
+import { createReviewLoopSpec, discoverMechanicalChecks, refreshReviewLoopSpec } from '../review/loop.js';
 import { createWorktreeSessionSpec } from '../execution/worktree.js';
 import { refreshBrowserValidationSpec } from '../validation/browser.js';
 import type { BrowserJourney, ExecutionPlan, HarnessStage, ProductManifest, Runbook } from '../contracts.js';
@@ -111,6 +111,7 @@ export function createRunbook(
         'Review findings are unresolved.',
       ],
       loop: reviewLoop,
+      checks: discoverMechanicalChecks(repoRoot),
     },
     maintenance: {
       automated: true,

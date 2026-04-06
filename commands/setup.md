@@ -11,6 +11,7 @@ Keep the explanation short and practical:
 - why complex tasks will be handled differently
 - whether the plugin is ready
 - what the user should do next
+- where global state lives and where repository task state will appear
 
 Only mention Claude Code internal hook names when you are editing `settings.json` or showing exact config keys.
 
@@ -125,7 +126,7 @@ fs.mkdirSync(path.join(base,'knowledge'),{recursive:true});
 fs.mkdirSync(path.join(base,'models'),{recursive:true});
 const defaults={
   'index.json': JSON.stringify({version:1,entries:[]},null,2),
-  'capture-log.json': JSON.stringify([],null,2),
+  'capture-log.json': JSON.stringify([],null,2), // transcript fingerprints and closeout queue entries
   'state.json': JSON.stringify({knowledgeCount:0,lastRecall:null,captureSync:{current:0,total:0},activeSession:null},null,2),
   'config.json': JSON.stringify({
     orchestration:{
@@ -238,6 +239,8 @@ Also explain the user-visible effect in plain language:
 - complex tasks can be automatically moved into a harness session
 - OpenArche will keep missing stages visible
 - task closeout and knowledge capture can happen after stop
+- active task state will live under `.openarche/sessions/<task-id>/state.json`
+- repository-specific captured knowledge will be written under `.openarche/knowledge/`
 
 Merge in the following hooks. Use `path.join(pluginDir, 'dist', 'integrations', 'claude', 'prompt-hook.js')` etc. to build paths (cross-platform). Replace `RUNTIME` with the full node path from Step 1:
 

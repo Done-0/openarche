@@ -1,10 +1,11 @@
 import { loadConfig } from '../config.js';
 import { cosineSimilarity, embed } from '../knowledge/embedding.js';
-import { createHarnessSession, evaluateHarnessCompletion, loadHarnessSession, synchronizeHarnessSession, writeHarnessSession } from './session.js';
+import { loadPrototypeSection } from '../knowledge/prototype-cache.js';
+import { createHarnessSession, evaluateHarnessCompletion, getHarnessSessionStatePath, loadHarnessSession, synchronizeHarnessSession, writeHarnessSession } from './session.js';
 import { createProductManifest } from '../product/manifest.js';
-import { writeHarnessBundle } from './artifact-writer.js';
 import { evaluateHarnessGateWithEmbeddings } from './gates.js';
 import { createHarnessBundle } from './harness-system.js';
+import { appendHarnessDecisionLog } from './decision-log.js';
 import { evaluateHarnessPolicy } from './policy.js';
 import type { HarnessPolicyDecision } from './policy.js';
 import type { HarnessCompletion, HarnessComplexity } from '../contracts.js';
@@ -20,9 +21,6 @@ export interface AutoHarnessFlowResult {
   decisionReasons: string[];
 }
 
-let signalPrototypeCacheKey = '';
-let signalPrototypeCache: { browser: number[][]; observability: number[][] } | null = null;
-
 export async function ensureAutoHarnessFlow(
   baseDir: string,
   promptText: string,
@@ -35,7 +33,16 @@ export async function ensureAutoHarnessFlow(
   const gate = await evaluateHarnessGateWithEmbeddings(promptText, config);
   const policy = options.decision ?? await evaluateHarnessPolicy(promptText, config, gate);
   const materialize = options.materialize ?? policy.materialize;
+  const decisionPrompt = promptText.replace(/\s+/g, ' ').trim().slice(0, 500);
   if (!gate.required) {
+    await appendHarnessDecisionLog(baseDir, {
+      repoRoot,
+      prompt: decisionPrompt,
+      gate,
+      policy,
+      decision: policy.mode,
+      sessionId: null,
+    });
     return {
       writtenPaths: [],
       required: false,
@@ -48,6 +55,14 @@ export async function ensureAutoHarnessFlow(
     };
   }
   if (!materialize) {
+    await appendHarnessDecisionLog(baseDir, {
+      repoRoot,
+      prompt: decisionPrompt,
+      gate,
+      policy,
+      decision: policy.mode,
+      sessionId: null,
+    });
     return {
       writtenPaths: [],
       required: true,
@@ -70,24 +85,18 @@ export async function ensureAutoHarnessFlow(
   let browserRelevant = routeMatches.length > 0;
   let observabilityRelevant = gate.requiredStages.includes('observe');
   try {
-    const cacheKey = config.knowledge.embedding.provider === 'local'
-      ? `local:${config.knowledge.embedding.localModel}`
-      : `remote:${config.knowledge.embedding.remoteBaseUrl}:${config.knowledge.embedding.remoteModel}`;
-    if (!signalPrototypeCache || signalPrototypeCacheKey !== cacheKey) {
-      signalPrototypeCacheKey = cacheKey;
-      signalPrototypeCache = {
-        browser: await Promise.all([
-          embed('fix or validate a browser-based user flow with visible interactions', config),
-          embed('verify page navigation forms buttons screenshots and front-end behavior', config),
-          embed('debug a user journey in the interface and prove it with browser evidence', config),
-        ]),
-        observability: await Promise.all([
-          embed('investigate reliability or performance with logs metrics traces and service signals', config),
-          embed('debug a runtime issue using observability evidence from application services', config),
-          embed('validate production behavior with logs metrics traces errors and latency checks', config),
-        ]),
-      };
-    }
+    const signalPrototypeCache = await loadPrototypeSection(config, 'signals', async () => ({
+      browser: await Promise.all([
+        embed('fix or validate a browser-based user flow with visible interactions', config),
+        embed('verify page navigation forms buttons screenshots and front-end behavior', config),
+        embed('debug a user journey in the interface and prove it with browser evidence', config),
+      ]),
+      observability: await Promise.all([
+        embed('investigate reliability or performance with logs metrics traces and service signals', config),
+        embed('debug a runtime issue using observability evidence from application services', config),
+        embed('validate production behavior with logs metrics traces errors and latency checks', config),
+      ]),
+    }));
     const promptEmbedding = await embed(promptText, config);
     const browserScore = signalPrototypeCache.browser.reduce((best, candidate) => Math.max(best, cosineSimilarity(promptEmbedding, candidate)), -1);
     const observabilityScore = signalPrototypeCache.observability.reduce((best, candidate) => Math.max(best, cosineSimilarity(promptEmbedding, candidate)), -1);
@@ -113,6 +122,7 @@ export async function ensureAutoHarnessFlow(
     : [];
 
   const bundle = createHarnessBundle({
+    gate,
     manifest: createProductManifest('workspace'),
     config,
     objective: persistedObjective,
@@ -144,7 +154,7 @@ export async function ensureAutoHarnessFlow(
     preflightWarnings.push(`Failed to inspect harness session state: ${error instanceof Error ? error.message : String(error)}`);
   }
   if (existingSession) {
-    const session = createHarnessSession(bundle, repoRoot, [], existingSession);
+    const session = createHarnessSession(bundle, repoRoot, existingSession);
     const warnings = [...preflightWarnings];
     try {
       await writeHarnessSession(repoRoot, session);
@@ -157,8 +167,16 @@ export async function ensureAutoHarnessFlow(
     } catch (error) {
       warnings.push(`Failed to synchronize harness session: ${error instanceof Error ? error.message : String(error)}`);
     }
+    await appendHarnessDecisionLog(baseDir, {
+      repoRoot,
+      prompt: decisionPrompt,
+      gate,
+      policy,
+      decision: 'materialize',
+      sessionId: bundle.runbook.plan.id,
+    });
     return {
-      writtenPaths: session.artifactPaths,
+      writtenPaths: [getHarnessSessionStatePath(repoRoot, session.id)],
       required: true,
       complexity: gate.complexity,
       sessionId: bundle.runbook.plan.id,
@@ -170,26 +188,43 @@ export async function ensureAutoHarnessFlow(
   }
 
   try {
-    const writtenPaths = await writeHarnessBundle(repoRoot, bundle);
-    const session = await synchronizeHarnessSession(repoRoot, bundle.runbook.plan.id) ?? await loadHarnessSession(repoRoot, bundle.runbook.plan.id);
+    const session = createHarnessSession(bundle, repoRoot);
+    await writeHarnessSession(repoRoot, session);
+    await appendHarnessDecisionLog(baseDir, {
+      repoRoot,
+      prompt: decisionPrompt,
+      gate,
+      policy,
+      decision: 'materialize',
+      sessionId: bundle.runbook.plan.id,
+    });
+    const synchronized = await synchronizeHarnessSession(repoRoot, bundle.runbook.plan.id) ?? await loadHarnessSession(repoRoot, bundle.runbook.plan.id);
     return {
-      writtenPaths,
+      writtenPaths: [getHarnessSessionStatePath(repoRoot, session.id)],
       required: true,
       complexity: gate.complexity,
       sessionId: bundle.runbook.plan.id,
-      completion: session ? evaluateHarnessCompletion(session) : null,
+      completion: synchronized ? evaluateHarnessCompletion(synchronized) : null,
       warnings: preflightWarnings,
       mode: 'materialize',
       decisionReasons: policy.reasons,
     };
   } catch (error) {
+    await appendHarnessDecisionLog(baseDir, {
+      repoRoot,
+      prompt: decisionPrompt,
+      gate,
+      policy,
+      decision: 'materialize',
+      sessionId: null,
+    });
     return {
       writtenPaths: [],
       required: true,
       complexity: gate.complexity,
       sessionId: bundle.runbook.plan.id,
       completion: null,
-      warnings: [...preflightWarnings, `Failed to materialize harness artifacts: ${error instanceof Error ? error.message : String(error)}`],
+      warnings: [...preflightWarnings, `Failed to materialize harness session: ${error instanceof Error ? error.message : String(error)}`],
       mode: 'materialize',
       decisionReasons: policy.reasons,
     };

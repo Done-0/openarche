@@ -6,10 +6,10 @@ OpenArche 是一个面向 Claude Code 的 harness-first 工程插件，处理非
 
 - `任务分级`：判断任务保持轻量还是进入 harness
 - `基于 embedding 的路由`：使用当前配置的 embedding 后端区分普通问答和执行型任务，不依赖语言关键词表
-- `持续会话`：只有真正进入执行后才会在 `.openarche/` 下落任务状态
+- `持续会话`：只有真正进入执行后才会在 `.openarche/sessions/<task-id>/state.json` 下落任务状态
 - `阶段门禁`：让验证、评审、维护持续保持显式状态
 - `上下文注入`：补充当前任务状态、接管理由和相关本地知识
-- `知识召回`：通过 embedding 和关联扩展复用本地工程知识
+- `知识召回`：优先复用仓库内知识，再补充全局知识
 - `后台收尾`：在任务结束后沉淀可复用经验
 
 ## 安装
@@ -43,10 +43,10 @@ OpenArche 是一个面向 Claude Code 的 harness-first 工程插件，处理非
 ## 工作方式
 
 1. 像平时一样向 Claude Code 提任务。
-2. 轻量任务保持轻量；非轻量任务会先注入 harness 上下文，只有显式执行或真正发生可写入/可执行工具活动后才会建立 `.openarche/` 任务会话。
+2. 轻量任务保持轻量；非轻量任务会先注入 harness 上下文，只有显式执行或真正发生可写入/可执行工具活动后才会建立 `.openarche/sessions/<task-id>/state.json` 任务会话。
 3. 系统会告诉 Claude Code 为什么这个任务被接管、还差哪些阶段、本地有哪些相关知识。
 4. 状态栏和会话状态会持续显示还没完成的环节，避免任务过早结束。
-5. 验证、评审、维护会一直保持打开状态，直到对应工件文件里记录了所需证据。
+5. 验证、评审、维护会一直保持打开状态，直到当前会话状态和证据目录里记录了所需证据。
 6. 任务结束时，系统会对当前会话做收尾，并为本次 transcript 排队沉淀知识。
 
 ## 命令
@@ -91,6 +91,40 @@ OpenArche 是一个面向 Claude Code 的 harness-first 工程插件，处理非
 ```text
 /openarche:knowledge-reindex
 ```
+
+## 运行时目录
+
+全局 OpenArche 状态位于：
+
+```text
+<home>/.claude/openarche/
+├── config.json
+├── state.json
+├── capture-log.json
+├── decision-log.jsonl
+├── prototype-cache.json
+├── index.json
+└── knowledge/
+```
+
+仓库级运行时状态位于：
+
+```text
+<repo>/.openarche/
+├── sessions/
+│   └── <task-id>/
+│       ├── state.json
+│       └── evidence/
+└── knowledge/
+    ├── index.json
+    └── <entry-id>.md
+```
+
+- 会话状态、validation、review、maintenance 都在 `sessions/<task-id>/state.json` 内。
+- 机械化 review 的命令输出会落到 `sessions/<task-id>/evidence/`。
+- 仓库任务的 closeout 会把可复用知识写入仓库内 `.openarche/knowledge/`。
+- Prompt 检索时会优先用仓库知识，再回退到全局知识库。
+- `capture-log.json` 里保存的是 transcript 指纹和 `closeout:<fingerprint>` 队列项，不再保存原始路径。
 
 ## 架构
 

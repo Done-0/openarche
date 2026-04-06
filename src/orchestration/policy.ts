@@ -1,4 +1,5 @@
 import { cosineSimilarity, embed } from '../knowledge/embedding.js';
+import { loadPrototypeSection } from '../knowledge/prototype-cache.js';
 import type { HarnessComplexity, HarnessGate } from '../contracts.js';
 import type { ProductConfig } from '../types.js';
 
@@ -13,9 +14,6 @@ export interface HarnessPolicyDecision {
   mode: HarnessPersistenceMode;
   reasons: string[];
 }
-
-let prototypeCacheKey = '';
-let prototypeCache: Record<HarnessIntent, number[][]> | null = null;
 
 export async function evaluateHarnessPolicy(
   promptText: string,
@@ -69,34 +67,28 @@ export async function evaluateHarnessPolicy(
   }
 
   try {
-    const cacheKey = config.knowledge.embedding.provider === 'local'
-      ? `local:${config.knowledge.embedding.localModel}`
-      : `remote:${config.knowledge.embedding.remoteBaseUrl}:${config.knowledge.embedding.remoteModel}`;
-    if (!prototypeCache || prototypeCacheKey !== cacheKey) {
-      prototypeCacheKey = cacheKey;
-      prototypeCache = {
-        question: await Promise.all([
-          embed('explain what this tool does and how it works', config),
-          embed('answer a question about the current system behavior without changing files', config),
-          embed('describe the purpose of generated files and status indicators', config),
-        ]),
-        configure: await Promise.all([
-          embed('inspect or change configuration values and explain the result', config),
-          embed('set up the tool or update runtime configuration without creating a task session', config),
-          embed('check environment settings and report what changed', config),
-        ]),
-        analysis: await Promise.all([
-          embed('inspect the current code and reason about whether the logic is correct before making changes', config),
-          embed('analyze architecture tradeoffs and explain what should change without editing files yet', config),
-          embed('review the current implementation and identify gaps before execution starts', config),
-        ]),
-        execute: await Promise.all([
-          embed('implement a change, verify it, review it, and finish the task end to end', config),
-          embed('refactor or fix code with explicit validation and follow-up work', config),
-          embed('perform a production engineering task that should open a harness session', config),
-        ]),
-      };
-    }
+    const prototypeCache = await loadPrototypeSection(config, 'policy', async () => ({
+      question: await Promise.all([
+        embed('explain what this tool does and how it works', config),
+        embed('answer a question about the current system behavior without changing files', config),
+        embed('describe the purpose of generated files and status indicators', config),
+      ]),
+      configure: await Promise.all([
+        embed('inspect or change configuration values and explain the result', config),
+        embed('set up the tool or update runtime configuration without creating a task session', config),
+        embed('check environment settings and report what changed', config),
+      ]),
+      analysis: await Promise.all([
+        embed('inspect the current code and reason about whether the logic is correct before making changes', config),
+        embed('analyze architecture tradeoffs and explain what should change without editing files yet', config),
+        embed('review the current implementation and identify gaps before execution starts', config),
+      ]),
+      execute: await Promise.all([
+        embed('implement a change, verify it, review it, and finish the task end to end', config),
+        embed('refactor or fix code with explicit validation and follow-up work', config),
+        embed('perform a production engineering task that should open a harness session', config),
+      ]),
+    })) as Record<HarnessIntent, number[][]>;
     const promptEmbedding = await embed(normalizedPrompt, config);
     const scores = {
       question: prototypeCache.question.reduce((best, candidate) => Math.max(best, cosineSimilarity(promptEmbedding, candidate)), -1),

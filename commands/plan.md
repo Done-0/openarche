@@ -38,4 +38,5 @@ When presenting the plan, organize it into:
 - execution steps
 - capability coverage
 
-If the user asks to save it, write the plan to `.openarche/<plan-id>.plan.json` unless they explicitly ask for another location.
+If the user asks to save it inside the live harness session, update `.openarche/sessions/<plan-id>/state.json` and keep the `runbook.plan` section valid.
+If the user explicitly asks for a standalone document outside the live session, write it to the location they requested.

@@ -1,15 +1,15 @@
 import { mkdir, readdir, readFile, writeFile, stat } from 'node:fs/promises';
-import { dirname } from 'node:path';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../config.js';
-import { loadState, saveState } from '../state.js';
-import { loadIndex, mutateIndex, saveIndex } from './index-store.js';
+import { mutateState } from '../state.js';
+import { loadIndex, mutateIndex } from './index-store.js';
 import { cosineSimilarity, embed } from './embedding.js';
 import { buildLinks, matchLinksHints } from './graph.js';
 import { callHaiku, parseExtractionResult, isValidCandidate } from './extraction.js';
+import { createTranscriptFingerprint, loadCaptureLog, markCaptureLogEntry } from './capture-log.js';
 import type { KnowledgeEntry } from '../types.js';
 
 const MIN_USER_TURNS = 5;
@@ -31,7 +31,7 @@ export async function findUnprocessedTranscripts(
         for (const file of files) {
           if (!file.name.endsWith('.jsonl')) continue;
           const filePath = join(projectPath, file.name);
-          if (processed.has(filePath)) continue;
+          if (processed.has(createTranscriptFingerprint(filePath))) continue;
           const fileStat = await stat(filePath).catch(() => null);
           if (!fileStat || Date.now() - fileStat.mtimeMs < SILENCE_MS) continue;
           try {
@@ -62,39 +62,24 @@ export async function findUnprocessedTranscripts(
 }
 
 async function loadProcessed(processedPath: string): Promise<Set<string>> {
-  try {
-    const raw = await readFile(processedPath, 'utf8');
-    return new Set(JSON.parse(raw) as string[]);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return new Set();
-    }
-    throw error;
-  }
-}
-
-async function writeProcessed(processedPath: string, processed: Set<string>): Promise<void> {
-  await mkdir(dirname(processedPath), { recursive: true });
-  await writeFile(processedPath, JSON.stringify(Array.from(processed), null, 2), 'utf8');
+  return loadCaptureLog(processedPath);
 }
 
 async function markProcessed(processedPath: string, path: string): Promise<void> {
-  const set = await loadProcessed(processedPath);
-  set.add(path);
-  await writeProcessed(processedPath, set);
+  await markCaptureLogEntry(processedPath, createTranscriptFingerprint(path));
 }
 
 async function writeCaptureSync(statePath: string, current: number, total: number): Promise<void> {
-  const state = await loadState(statePath);
-  state.captureSync = { current, total };
-  await saveState(statePath, state);
+  await mutateState(statePath, state => {
+    state.captureSync = { current, total };
+  });
 }
 
 async function markBootstrapComplete(statePath: string, indexPath: string): Promise<void> {
-  const finalState = await loadState(statePath);
-  finalState.captureSync = { current: 0, total: 0 };
-  finalState.knowledgeCount = (await loadIndex(indexPath)).entries.length;
-  await saveState(statePath, finalState);
+  await mutateState(statePath, async state => {
+    state.captureSync = { current: 0, total: 0 };
+    state.knowledgeCount = (await loadIndex(indexPath)).entries.length;
+  });
 }
 
 async function handleTranscriptBootstrap(

@@ -1,4 +1,5 @@
-import { open, readFile, writeFile, rename, unlink } from 'node:fs/promises';
+import { mkdir, open, readFile, writeFile, rename, unlink } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import type { KnowledgeEntry, KnowledgeIndex } from '../types.js';
 
 const EMPTY_INDEX: KnowledgeIndex = { version: 1, entries: [] };
@@ -81,6 +82,7 @@ export async function saveIndex(indexPath: string, index: KnowledgeIndex, lockHe
     throw new Error('Invalid index shape');
   }
   const lockPath = indexPath + '.lock';
+  await mkdir(dirname(indexPath), { recursive: true });
   if (!lockHeld) {
     await acquireIndexLock(lockPath);
   }
@@ -89,6 +91,13 @@ export async function saveIndex(indexPath: string, index: KnowledgeIndex, lockHe
     await writeFile(tmp, JSON.stringify(index, null, 2), 'utf8');
     await rename(tmp, indexPath);
   } finally {
+    try {
+      await unlink(tmp);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+    }
     if (!lockHeld) {
       await releaseIndexLock(lockPath);
     }
@@ -100,6 +109,7 @@ export async function mutateIndex<T>(
   mutate: (index: KnowledgeIndex) => Promise<T> | T
 ): Promise<T> {
   const lockPath = indexPath + '.lock';
+  await mkdir(dirname(indexPath), { recursive: true });
   await acquireIndexLock(lockPath);
   try {
     const index = await loadIndex(indexPath);

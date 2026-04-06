@@ -32,4 +32,5 @@ When presenting the runbook, organize it into:
 
 Prefer capability-oriented structure over implementation-layer structure.
 
-If the user asks to save it, write the runbook to `.openarche/<plan-id>.runbook.json` unless they explicitly ask for another location.
+If the user asks to save it inside the active harness session, update `.openarche/sessions/<plan-id>/state.json` and keep the `runbook` structure valid.
+If the user explicitly asks for a standalone document outside the live session, write it to the location they requested.

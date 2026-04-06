@@ -37,31 +37,51 @@ async function embedRemote(text: string, config: ProductConfig): Promise<number[
   const { remoteApiKey, remoteModel, remoteBaseUrl } = config.knowledge.embedding;
 
   const baseUrl = remoteBaseUrl.replace(/\/$/, '');
-  const resp = await fetch(`${baseUrl}/embeddings`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${remoteApiKey}`,
-    },
-    body: JSON.stringify({ input: text, model: remoteModel }),
-  });
-
-  if (!resp.ok) {
-    const errorText = await resp.text();
-    throw new Error(`Embedding API error: ${resp.status} ${resp.statusText} - ${errorText}`);
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    try {
+      const resp = await fetch(`${baseUrl}/embeddings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${remoteApiKey}`,
+        },
+        body: JSON.stringify({ input: text, model: remoteModel }),
+        signal: controller.signal,
+      });
+      if (!resp.ok) {
+        const errorText = await resp.text();
+        if (resp.status === 408 || resp.status === 429 || resp.status >= 500) {
+          throw new Error(`Embedding API transient error: ${resp.status} ${resp.statusText} - ${errorText}`);
+        }
+        throw new Error(`Embedding API error: ${resp.status} ${resp.statusText} - ${errorText}`);
+      }
+      const json = await resp.json() as { data?: Array<{ embedding?: number[] }>; error?: { message: string } };
+      if (json.error) throw new Error(`Embedding API error: ${json.error.message}`);
+      if (!json.data || json.data.length === 0 || !json.data[0].embedding) {
+        throw new Error('Embedding API returned invalid response');
+      }
+      return json.data[0].embedding;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (
+        attempt === 2
+        || !(
+          lastError.name === 'AbortError'
+          || /transient error/i.test(lastError.message)
+          || /ECONNRESET|ETIMEDOUT|fetch failed/i.test(lastError.message)
+        )
+      ) {
+        throw lastError;
+      }
+      await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1) * (attempt + 1)));
+    } finally {
+      clearTimeout(timeout);
+    }
   }
-
-  const json = await resp.json() as { data?: Array<{ embedding?: number[] }>; error?: { message: string } };
-
-  if (json.error) {
-    throw new Error(`Embedding API error: ${json.error.message}`);
-  }
-
-  if (!json.data || json.data.length === 0 || !json.data[0].embedding) {
-    throw new Error('Embedding API returned invalid response');
-  }
-
-  return json.data[0].embedding;
+  throw lastError ?? new Error('Embedding API failed');
 }
 
 export async function embed(text: string, config: ProductConfig): Promise<number[]> {

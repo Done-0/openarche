@@ -6,10 +6,10 @@ OpenArche is a harness-first Claude Code plugin for non-trivial engineering work
 
 - `Task grading`: decides whether a task stays light or enters harness control
 - `Embedding-based routing`: uses the configured embedding backend to separate plain questions from execution work without language-specific keyword lists
-- `Persistent sessions`: materializes `.openarche/` task state when execution work actually starts
+- `Persistent sessions`: materializes `.openarche/sessions/<task-id>/state.json` only when execution work actually starts
 - `Stage gates`: keeps validation, review, and maintenance open until they are actually closed
 - `Context injection`: adds current task state, gate reasons, and relevant local knowledge
-- `Knowledge recall`: retrieves local engineering knowledge through embeddings and link expansion
+- `Knowledge recall`: retrieves repository-local knowledge first, then global knowledge, through embeddings and link expansion
 - `Background closeout`: captures reusable knowledge after the task stops
 
 ## Installation
@@ -43,10 +43,10 @@ If you use local embeddings, the first successful run may need network access to
 ## How It Works
 
 1. Use Claude Code as usual.
-2. Light tasks stay lightweight. Non-light tasks receive harness context first, and `.openarche/` session artifacts are materialized only for explicit execution work or after write-capable or execution-capable tool activity starts.
+2. Light tasks stay lightweight. Non-light tasks receive harness context first, and `.openarche/sessions/<task-id>/state.json` is materialized only for explicit execution work or after write-capable or execution-capable tool activity starts.
 3. OpenArche tells Claude Code why the task was gated, which stages are still open, and which local knowledge is relevant.
 4. The status line and session state keep showing what is still open, so the task does not quietly close too early.
-5. Validation, review, and maintenance stay open until the required evidence is recorded in the session artifacts.
+5. Validation, review, and maintenance stay open until the required evidence is recorded inside the current session state and evidence directory.
 6. When the task stops, OpenArche closes out the session and queues reusable knowledge capture for that transcript.
 
 ## Commands
@@ -91,6 +91,40 @@ If the embedding provider changes, run:
 ```text
 /openarche:knowledge-reindex
 ```
+
+## Runtime Layout
+
+Global OpenArche state lives under:
+
+```text
+<home>/.claude/openarche/
+├── config.json
+├── state.json
+├── capture-log.json
+├── decision-log.jsonl
+├── prototype-cache.json
+├── index.json
+└── knowledge/
+```
+
+Repository-scoped runtime state lives under:
+
+```text
+<repo>/.openarche/
+├── sessions/
+│   └── <task-id>/
+│       ├── state.json
+│       └── evidence/
+└── knowledge/
+    ├── index.json
+    └── <entry-id>.md
+```
+
+- Session state, validation, review, and maintenance all live inside `sessions/<task-id>/state.json`.
+- Mechanical review command output is written into `sessions/<task-id>/evidence/`.
+- Closeout for repository tasks writes reusable knowledge into repository-local `.openarche/knowledge/`.
+- Prompt recall prefers repository-local knowledge and falls back to the global store.
+- `capture-log.json` stores transcript fingerprints and `closeout:<fingerprint>` queue entries instead of raw paths.
 
 ## Architecture
 

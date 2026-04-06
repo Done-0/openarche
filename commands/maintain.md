@@ -7,10 +7,10 @@ Use this command to inspect or update the maintenance stage for the current harn
 
 Required behavior:
 
-1. Prefer the current session maintenance artifact in `.openarche/*.maintenance.json`.
+1. Prefer the current session state in `.openarche/sessions/<task-id>/state.json`.
    Only create a separate note when the user explicitly asks for one.
-2. Read the current maintenance spec and keep its existing structure stable.
-3. Use the spec as the source of truth for:
+2. Read the current `runbook.maintenance.spec` section and keep its existing structure stable.
+3. Use `runbook.maintenance.spec` as the source of truth for:
    - `qualitySweep`
    - `driftSweep`
    - `cleanupTasks`
@@ -19,8 +19,8 @@ Required behavior:
    - `followupsRecorded`
    - `blockers`
    - `ready`
-4. If you update maintenance state, write the artifact back and keep it valid.
-5. If the task is tied to a harness session, prefer updating the real maintenance artifact over writing free-form prose.
+4. If you update maintenance state, write it back into the session state and keep the full file valid.
+5. If the task is tied to a harness session, prefer updating the real session state over writing free-form prose.
 
 When presenting maintenance work, organize it into:
 
