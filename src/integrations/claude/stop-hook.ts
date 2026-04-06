@@ -11,6 +11,9 @@ import { getLastHumanMessage } from './prompt-hook.js';
 import type { MaintenanceProtocol } from '../../contracts.js';
 import { loadState, saveState } from '../../state.js';
 import type { StdinData } from '../../types.js';
+import { loadConfig } from '../../config.js';
+import { evaluateHarnessGateWithEmbeddings } from '../../orchestration/gates.js';
+import { evaluateHarnessPolicy } from '../../orchestration/policy.js';
 
 const BASE_DIR = join(homedir(), '.claude', 'openarche');
 const CAPTURE_LOG_PATH = join(BASE_DIR, 'capture-log.json');
@@ -35,7 +38,19 @@ async function main(): Promise<void> {
   if (!transcript) return;
 
   const promptText = stdin.prompt ?? await getLastHumanMessage(stdin.transcript_path);
-  const autoFlow = promptText && stdin.cwd ? await ensureAutoHarnessFlow(BASE_DIR, promptText, stdin.cwd) : null;
+  let autoFlow = null;
+  if (promptText && stdin.cwd) {
+    const config = await loadConfig(join(BASE_DIR, 'config.json'));
+    const gate = await evaluateHarnessGateWithEmbeddings(promptText, config);
+    const policy = await evaluateHarnessPolicy(promptText, config, gate);
+    const sawExecution = transcript.includes('"tool_use"') || transcript.includes('"tool_result"');
+    autoFlow = await ensureAutoHarnessFlow(
+      BASE_DIR,
+      promptText,
+      stdin.cwd,
+      { materialize: policy.materialize || config.orchestration.persistAfterFirstToolUse && sawExecution && gate.required, decision: policy }
+    );
+  }
 
   if (stdin.cwd && autoFlow?.sessionId && (transcript.includes('"tool_use"') || transcript.includes('"tool_result"'))) {
     await recordHarnessStageCompletion(

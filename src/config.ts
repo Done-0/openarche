@@ -2,6 +2,14 @@ import { readFile } from 'node:fs/promises';
 import type { ProductConfig } from './types.js';
 
 export const DEFAULT_CONFIG: ProductConfig = {
+  orchestration: {
+    autoInject: true,
+    persistAfterFirstToolUse: true,
+    readOnlyCommands: ['/openarche:setup', '/openarche:config', '/openarche:knowledge-search'],
+    explicitSessionCommands: ['/openarche:plan', '/openarche:run', '/openarche:validate', '/openarche:observe', '/openarche:review', '/openarche:maintain'],
+    injectOnlyIntentThreshold: 0.6,
+    materializeIntentThreshold: 0.72,
+  },
   knowledge: {
     embedding: {
       provider: 'local',
@@ -53,7 +61,21 @@ export async function loadConfig(configPath: string): Promise<ProductConfig> {
     const raw = await readFile(configPath, 'utf8');
     const config = JSON.parse(raw) as ProductConfig;
     if (
-      !config.knowledge?.embedding
+      !config.orchestration
+      || typeof config.orchestration.autoInject !== 'boolean'
+      || typeof config.orchestration.persistAfterFirstToolUse !== 'boolean'
+      || !Array.isArray(config.orchestration.readOnlyCommands)
+      || !config.orchestration.readOnlyCommands.every(item => typeof item === 'string')
+      || !Array.isArray(config.orchestration.explicitSessionCommands)
+      || !config.orchestration.explicitSessionCommands.every(item => typeof item === 'string')
+      || typeof config.orchestration.injectOnlyIntentThreshold !== 'number'
+      || typeof config.orchestration.materializeIntentThreshold !== 'number'
+      || config.orchestration.injectOnlyIntentThreshold <= 0
+      || config.orchestration.injectOnlyIntentThreshold >= 1
+      || config.orchestration.materializeIntentThreshold <= 0
+      || config.orchestration.materializeIntentThreshold >= 1
+      || config.orchestration.materializeIntentThreshold < config.orchestration.injectOnlyIntentThreshold
+      || !config.knowledge?.embedding
       || (
         config.knowledge.embedding.provider === 'local'
           ? typeof config.knowledge.embedding.localModel !== 'string'

@@ -73,6 +73,7 @@ Config file:
 ```
 
 - `knowledge.embedding.provider`: `local` or `remote`
+- `orchestration`: auto-injection, deferred materialization, and explicit command policy
 - `knowledge.embedding.localModel`: used only when the provider is `local`
 - `knowledge.embedding.remoteModel`, `knowledge.embedding.remoteApiKey`, `knowledge.embedding.remoteBaseUrl`: used only when the provider is `remote`
 - `knowledge.retrieval`: recall threshold, recall fanout, and injection budget

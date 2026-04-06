@@ -128,6 +128,14 @@ const defaults={
   'capture-log.json': JSON.stringify([],null,2),
   'state.json': JSON.stringify({knowledgeCount:0,lastRecall:null,captureSync:{current:0,total:0},activeSession:null},null,2),
   'config.json': JSON.stringify({
+    orchestration:{
+      autoInject:true,
+      persistAfterFirstToolUse:true,
+      readOnlyCommands:['/openarche:setup','/openarche:config','/openarche:knowledge-search'],
+      explicitSessionCommands:['/openarche:plan','/openarche:run','/openarche:validate','/openarche:observe','/openarche:review','/openarche:maintain'],
+      injectOnlyIntentThreshold:0.6,
+      materializeIntentThreshold:0.72
+    },
     knowledge:{
       embedding:{provider:'local',localModel:'Xenova/multilingual-e5-small'},
       retrieval:{threshold:0.73,topK:3,maxInjectChars:4000},

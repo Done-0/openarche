@@ -18,6 +18,14 @@ Read that file.
 
 When showing the current config, group it by section and include the config path:
 
+**Orchestration**
+- `orchestration.autoInject`
+- `orchestration.persistAfterFirstToolUse`
+- `orchestration.readOnlyCommands`
+- `orchestration.explicitSessionCommands`
+- `orchestration.injectOnlyIntentThreshold`
+- `orchestration.materializeIntentThreshold`
+
 **Knowledge**
 - `knowledge.embedding.provider`
 - If provider is `local`, show `knowledge.embedding.localModel`
@@ -58,6 +66,7 @@ When showing the current config, group it by section and include the config path
 
 When editing:
 
+- Keep `orchestration.materializeIntentThreshold` greater than or equal to `orchestration.injectOnlyIntentThreshold`.
 - Only write fields that belong to the selected embedding provider.
 - If switching to `local`, remove remote-only embedding fields.
 - If switching to `remote`, remove `localModel` and require `remoteModel`, `remoteApiKey`, and `remoteBaseUrl`.

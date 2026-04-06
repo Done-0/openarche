@@ -4,6 +4,8 @@ import { createProductManifest } from '../product/manifest.js';
 import { writeHarnessBundle } from './artifact-writer.js';
 import { evaluateHarnessGateWithEmbeddings } from './gates.js';
 import { createHarnessBundle } from './harness-system.js';
+import { evaluateHarnessPolicy } from './policy.js';
+import type { HarnessPolicyDecision } from './policy.js';
 import type { HarnessCompletion, HarnessComplexity } from '../contracts.js';
 
 export interface AutoHarnessFlowResult {
@@ -13,13 +15,22 @@ export interface AutoHarnessFlowResult {
   sessionId: string | null;
   completion: HarnessCompletion | null;
   warnings: string[];
+  mode: 'skip' | 'inject_only' | 'materialize';
+  decisionReasons: string[];
 }
 
-export async function ensureAutoHarnessFlow(baseDir: string, promptText: string, repoRoot?: string): Promise<AutoHarnessFlowResult | null> {
+export async function ensureAutoHarnessFlow(
+  baseDir: string,
+  promptText: string,
+  repoRoot?: string,
+  options: { materialize?: boolean; decision?: HarnessPolicyDecision } = {}
+): Promise<AutoHarnessFlowResult | null> {
   if (!repoRoot) return null;
 
   const config = await loadConfig(`${baseDir}/config.json`);
   const gate = await evaluateHarnessGateWithEmbeddings(promptText, config);
+  const policy = options.decision ?? await evaluateHarnessPolicy(promptText, config, gate);
+  const materialize = options.materialize ?? policy.materialize;
   if (!gate.required) {
     return {
       writtenPaths: [],
@@ -28,6 +39,20 @@ export async function ensureAutoHarnessFlow(baseDir: string, promptText: string,
       sessionId: null,
       completion: null,
       warnings: [],
+      mode: policy.mode,
+      decisionReasons: policy.reasons,
+    };
+  }
+  if (!materialize) {
+    return {
+      writtenPaths: [],
+      required: true,
+      complexity: gate.complexity,
+      sessionId: null,
+      completion: null,
+      warnings: [],
+      mode: policy.mode,
+      decisionReasons: policy.reasons,
     };
   }
 
@@ -108,6 +133,8 @@ export async function ensureAutoHarnessFlow(baseDir: string, promptText: string,
       sessionId: bundle.runbook.plan.id,
       completion: evaluateHarnessCompletion(synchronized ?? session),
       warnings,
+      mode: 'materialize',
+      decisionReasons: policy.reasons,
     };
   }
 
@@ -121,6 +148,8 @@ export async function ensureAutoHarnessFlow(baseDir: string, promptText: string,
       sessionId: bundle.runbook.plan.id,
       completion: session ? evaluateHarnessCompletion(session) : null,
       warnings: preflightWarnings,
+      mode: 'materialize',
+      decisionReasons: policy.reasons,
     };
   } catch (error) {
     return {
@@ -130,6 +159,8 @@ export async function ensureAutoHarnessFlow(baseDir: string, promptText: string,
       sessionId: bundle.runbook.plan.id,
       completion: null,
       warnings: [...preflightWarnings, `Failed to materialize harness artifacts: ${error instanceof Error ? error.message : String(error)}`],
+      mode: 'materialize',
+      decisionReasons: policy.reasons,
     };
   }
 }

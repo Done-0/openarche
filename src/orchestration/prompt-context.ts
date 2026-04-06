@@ -9,6 +9,7 @@ import { retrieve } from '../knowledge/search.js';
 import { ensureAutoHarnessFlow } from './auto-flow.js';
 import { escapeXml } from './context-xml.js';
 import { evaluateHarnessGateWithEmbeddings } from './gates.js';
+import { evaluateHarnessPolicy } from './policy.js';
 import { formatContextXml } from './context-xml.js';
 import { evaluateHarnessCompletion, synchronizeHarnessSession } from './session.js';
 
@@ -27,6 +28,7 @@ export async function buildPromptContext(request: PromptContextRequest): Promise
   const config = await loadConfig(configPath);
   const manifest = createProductManifest('workspace');
   const gate = await evaluateHarnessGateWithEmbeddings(request.promptText, config);
+  const policy = await evaluateHarnessPolicy(request.promptText, config, gate);
   const readiness = Number((
     Object.values(manifest.capabilities).reduce((sum, capability) => (
       sum + (
@@ -37,7 +39,7 @@ export async function buildPromptContext(request: PromptContextRequest): Promise
       )
     ), 0) / Object.values(manifest.capabilities).length
   ).toFixed(2));
-  const autoFlow = await ensureAutoHarnessFlow(request.baseDir, request.promptText, request.cwd);
+  const autoFlow = await ensureAutoHarnessFlow(request.baseDir, request.promptText, request.cwd, { materialize: policy.materialize, decision: policy });
   if (request.cwd && autoFlow?.sessionId) {
     const synchronized = await synchronizeHarnessSession(request.cwd, autoFlow.sessionId);
     if (synchronized) {
@@ -64,13 +66,18 @@ export async function buildPromptContext(request: PromptContextRequest): Promise
     '  <rule>Capture reusable engineering knowledge after the task.</rule>',
   ].join('\n');
   const gateSummary = gate.required
-    ? `This task is being placed under harness control because ${gate.reasons.join(' ').toLowerCase() || 'it is not safe to treat it as a light task.'}`
+    ? policy.materialize
+      ? `This task is being placed under harness control because ${policy.reasons.join(' ').toLowerCase() || 'it is not safe to treat it as a light task.'}`
+      : `OpenArche is injecting harness context without materializing a task session because ${policy.reasons.join(' ').toLowerCase() || 'the task does not yet justify persisted project artifacts.'}`
     : 'This task stays light, so only minimal harness context is injected.';
   const gateXml = [
     `  <gate required="${gate.required}" complexity="${escapeXml(gate.complexity)}" stages="${escapeXml(gate.requiredStages.join(','))}">${escapeXml(gate.reasons.join(' ') || 'Light task; minimal harness stages are sufficient.')}</gate>`,
+    `  <policy mode="${escapeXml(autoFlow?.mode ?? 'skip')}" intent="${escapeXml(policy.intent)}" command="${escapeXml(policy.command ?? '')}" materialize="${policy.materialize}">${escapeXml(policy.reasons.join(' ') || 'No additional policy reason was recorded.')}</policy>`,
     `  <impact>${escapeXml(gateSummary)}</impact>`,
     gate.required
-      ? `  <operator_expectation>${escapeXml(`Do not treat this as a one-shot chat task. Keep the remaining stages explicit until ${gate.requiredStages.join(', ')} are either satisfied or intentionally acknowledged.`)}</operator_expectation>`
+      ? policy.materialize
+        ? `  <operator_expectation>${escapeXml(`Do not treat this as a one-shot chat task. Keep the remaining stages explicit until ${gate.requiredStages.join(', ')} are either satisfied or intentionally acknowledged.`)}</operator_expectation>`
+        : `  <operator_expectation>${escapeXml('Keep the answer grounded, but do not create or assume a persisted harness session unless execution actually starts or the user enters an explicit harness command.')}</operator_expectation>`
       : `  <operator_expectation>${escapeXml('Answer directly, but still keep the work grounded and avoid drifting into uncontrolled complexity.')}</operator_expectation>`,
   ].join('\n');
   const sessionXml = autoFlow?.sessionId
@@ -86,7 +93,11 @@ export async function buildPromptContext(request: PromptContextRequest): Promise
         ...(autoFlow.warnings.length > 0 ? autoFlow.warnings.map(warning => `    <warning>${escapeXml(warning)}</warning>`) : []),
         '  </session>',
       ].join('\n')
-    : `  <session active="false">${escapeXml('No active harness session is required for this prompt.')}</session>`;
+    : `  <session active="false">${escapeXml(
+      gate.required && policy.inject
+        ? 'Harness context is active, but project artifacts are deferred until execution begins.'
+        : 'No active harness session is required for this prompt.'
+    )}</session>`;
   const baseContext = `<openarche_context>\n<capabilities readiness="${readiness.toFixed(2)}">\n${capabilityXml}\n</capabilities>\n<harness_policy mode="required">\n${policyXml}\n${gateXml}\n${sessionXml}\n</harness_policy>\n<workflow>\n${workflowXml}\n</workflow>\n</openarche_context>`;
   const state = await loadState(statePath);
   state.activeSession = autoFlow?.sessionId && autoFlow.completion

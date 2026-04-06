@@ -22,6 +22,14 @@ export interface KnowledgeIndex {
 }
 
 export interface ProductConfig {
+  orchestration: {
+    autoInject: boolean;
+    persistAfterFirstToolUse: boolean;
+    readOnlyCommands: string[];
+    explicitSessionCommands: string[];
+    injectOnlyIntentThreshold: number;
+    materializeIntentThreshold: number;
+  };
   knowledge: {
     embedding:
       | {

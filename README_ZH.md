@@ -73,6 +73,7 @@ OpenArche 是一个面向 Claude Code 的 harness-first 工程插件，处理非
 ```
 
 - `knowledge.embedding.provider`：`local` 或 `remote`
+- `orchestration`：自动注入、延迟落盘和显式命令策略
 - `knowledge.embedding.localModel`：仅在 `local` 时使用
 - `knowledge.embedding.remoteModel`、`knowledge.embedding.remoteApiKey`、`knowledge.embedding.remoteBaseUrl`：仅在 `remote` 时使用
 - `knowledge.retrieval`：召回阈值、召回数量和注入预算
