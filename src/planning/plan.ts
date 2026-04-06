@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { AcceptanceCriterion, ExecutionPlan, PlanStep } from '../contracts.js';
 
 export function createExecutionPlan(
@@ -36,11 +37,7 @@ export function createExecutionPlan(
     });
   }
   return {
-    id: normalizedObjective
-      .toLowerCase()
-      .replace(/[^\p{Letter}\p{Number}]+/gu, '-')
-      .replace(/(^-|-$)/g, '')
-      .slice(0, 48) || 'plan',
+    id: `task-${createHash('sha256').update(normalizedObjective).digest('hex').slice(0, 12)}`,
     objective: normalizedObjective,
     acceptanceCriteria: normalizedCriteria,
     steps: normalizedSteps,
