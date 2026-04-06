@@ -1,4 +1,5 @@
 import { loadConfig } from '../config.js';
+import { cosineSimilarity, embed } from '../knowledge/embedding.js';
 import { createHarnessSession, evaluateHarnessCompletion, loadHarnessSession, synchronizeHarnessSession, writeHarnessSession } from './session.js';
 import { createProductManifest } from '../product/manifest.js';
 import { writeHarnessBundle } from './artifact-writer.js';
@@ -18,6 +19,9 @@ export interface AutoHarnessFlowResult {
   mode: 'skip' | 'inject_only' | 'materialize';
   decisionReasons: string[];
 }
+
+let signalPrototypeCacheKey = '';
+let signalPrototypeCache: { browser: number[][]; observability: number[][] } | null = null;
 
 export async function ensureAutoHarnessFlow(
   baseDir: string,
@@ -57,23 +61,50 @@ export async function ensureAutoHarnessFlow(
   }
 
   const routeMatches = Array.from(new Set(promptText.match(/\/[A-Za-z0-9/_-]+/g) ?? []));
-  const lowerPrompt = promptText.toLowerCase();
   const persistedObjective = promptText
     .replace(/\bsk-[A-Za-z0-9_-]+\b/g, '[redacted-secret]')
     .replace(/\bBearer\s+[A-Za-z0-9._~+\/=-]+\b/gi, 'Bearer [redacted-secret]')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 240) || 'Requested engineering change';
-  const browserSignals = ['ui', 'page', 'screen', 'browser', 'dom', 'click', 'form', 'button', 'modal', 'navigation', 'checkout', 'signup', 'login', 'onboarding'];
-  const observabilitySignals = ['latency', 'performance', 'reliability', 'timeout', 'slow', 'error', 'trace', 'metric', 'metrics', 'log', 'logs', 'throughput', 'availability'];
-  const journeys = routeMatches.length > 0 || browserSignals.some(signal => lowerPrompt.includes(signal))
+  let browserRelevant = routeMatches.length > 0;
+  let observabilityRelevant = gate.requiredStages.includes('observe');
+  try {
+    const cacheKey = config.knowledge.embedding.provider === 'local'
+      ? `local:${config.knowledge.embedding.localModel}`
+      : `remote:${config.knowledge.embedding.remoteBaseUrl}:${config.knowledge.embedding.remoteModel}`;
+    if (!signalPrototypeCache || signalPrototypeCacheKey !== cacheKey) {
+      signalPrototypeCacheKey = cacheKey;
+      signalPrototypeCache = {
+        browser: await Promise.all([
+          embed('fix or validate a browser-based user flow with visible interactions', config),
+          embed('verify page navigation forms buttons screenshots and front-end behavior', config),
+          embed('debug a user journey in the interface and prove it with browser evidence', config),
+        ]),
+        observability: await Promise.all([
+          embed('investigate reliability or performance with logs metrics traces and service signals', config),
+          embed('debug a runtime issue using observability evidence from application services', config),
+          embed('validate production behavior with logs metrics traces errors and latency checks', config),
+        ]),
+      };
+    }
+    const promptEmbedding = await embed(promptText, config);
+    const browserScore = signalPrototypeCache.browser.reduce((best, candidate) => Math.max(best, cosineSimilarity(promptEmbedding, candidate)), -1);
+    const observabilityScore = signalPrototypeCache.observability.reduce((best, candidate) => Math.max(best, cosineSimilarity(promptEmbedding, candidate)), -1);
+    browserRelevant = browserRelevant || browserScore >= 0.62;
+    observabilityRelevant = observabilityRelevant || observabilityScore >= 0.62;
+  } catch {
+    browserRelevant = browserRelevant || gate.complexity === 'high';
+    observabilityRelevant = observabilityRelevant || gate.complexity === 'high';
+  }
+  const journeys = browserRelevant
     ? [{
         name: persistedObjective.slice(0, 80) || 'Primary journey',
         route: routeMatches.length > 0 ? routeMatches : ['/'],
         successSignal: persistedObjective.slice(0, 160) || 'The user-visible flow succeeds.',
       }]
     : [];
-  const services = gate.requiredStages.includes('observe') || observabilitySignals.some(signal => lowerPrompt.includes(signal))
+  const services = observabilityRelevant
     ? Array.from(new Set(
         routeMatches
           .map(route => route.split('/').filter(Boolean)[0] ?? '')
@@ -102,7 +133,7 @@ export async function ensureAutoHarnessFlow(
       outcome: `${stage} stage requirements are explicit and actionable.`,
     })),
     repoRoot,
-    services: services.length > 0 ? services : (gate.requiredStages.includes('observe') ? ['application'] : []),
+    services: services.length > 0 ? services : (observabilityRelevant ? ['application'] : []),
     journeys,
   });
   let existingSession = null;

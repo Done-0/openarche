@@ -23,6 +23,9 @@ export async function evaluateHarnessPolicy(
   gate: HarnessGate
 ): Promise<HarnessPolicyDecision> {
   const normalizedPrompt = promptText.replace(/\s+/g, ' ').trim();
+  const denseLength = normalizedPrompt.replace(/\s+/g, '').length;
+  const punctuationCount = Array.from(normalizedPrompt.matchAll(/[^\p{L}\p{N}\s]/gu)).length;
+  const lineCount = promptText.split('\n').map(line => line.trim()).filter(Boolean).length;
   const command = normalizedPrompt.match(/^\/[A-Za-z0-9:_-]+/)?.[0] ?? null;
   if (!config.orchestration.autoInject) {
     return {
@@ -98,9 +101,9 @@ export async function evaluateHarnessPolicy(
     const ranked = Object.entries(scores).sort((a, b) => b[1] - a[1]) as Array<[HarnessIntent, number]>;
     const [intent, score] = ranked[0];
     const structuralExecutionSignal =
-      normalizedPrompt.length >= 160
-      || (normalizedPrompt.match(/[,:;.!?]/g) ?? []).length >= 3
-      || (normalizedPrompt.match(/[，、；。！？]/g) ?? []).length >= 3
+      denseLength >= 160
+      || punctuationCount >= 3
+      || lineCount >= 4
       || gate.complexity === 'high';
     if (intent === 'execute' && (score >= config.orchestration.materializeIntentThreshold || structuralExecutionSignal)) {
       return {
@@ -127,10 +130,10 @@ export async function evaluateHarnessPolicy(
       command,
       intent: 'execute',
       inject: true,
-      materialize: gate.complexity === 'high',
-      mode: gate.complexity === 'high' ? 'materialize' : 'inject_only',
-      reasons: gate.complexity === 'high'
-        ? [...gate.reasons, 'Intent scoring was unavailable, so high-complexity work still materializes a harness session.']
+      materialize: gate.complexity === 'high' || gate.complexity === 'moderate' && denseLength >= 80 && punctuationCount >= 1,
+      mode: gate.complexity === 'high' || gate.complexity === 'moderate' && denseLength >= 80 && punctuationCount >= 1 ? 'materialize' : 'inject_only',
+      reasons: gate.complexity === 'high' || gate.complexity === 'moderate' && denseLength >= 80 && punctuationCount >= 1
+        ? [...gate.reasons, 'Intent scoring was unavailable, so structurally strong execution work still materializes a harness session.']
         : [...gate.reasons, 'Intent scoring was unavailable, so OpenArche falls back to inject-only mode.'],
     };
   }

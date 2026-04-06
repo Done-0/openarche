@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extractKnowledgeFromPayload, type TempPayload } from '../knowledge/extraction.js';
 import type { MaintenanceProtocol } from '../contracts.js';
-import { synchronizeHarnessSession } from './session.js';
+import { cleanupHarnessSessions, synchronizeHarnessSession } from './session.js';
 
 async function main(): Promise<void> {
   const tmpFile = process.argv[2];
@@ -50,6 +50,7 @@ async function main(): Promise<void> {
   }
 
   await synchronizeHarnessSession(payload.repoRoot, payload.sessionId);
+  await cleanupHarnessSessions(payload.repoRoot);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

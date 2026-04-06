@@ -2,36 +2,17 @@ import { cosineSimilarity, embed } from '../knowledge/embedding.js';
 import type { ProductConfig } from '../types.js';
 import type { HarnessComplexity, HarnessGate, HarnessStageName } from '../contracts.js';
 
-const COMPLEX_KEYWORDS = [
-  'refactor',
-  'architecture',
-  'migration',
-  'reliability',
-  'performance',
-  'latency',
-  'validation',
-  'review',
-  'observability',
-  'worktree',
-  'bug',
-  'regression',
-  'flow',
-];
-
 export function evaluateHarnessGate(promptText: string): HarnessGate {
-  const text = promptText.trim().toLowerCase();
+  const text = promptText.replace(/\s+/g, ' ').trim();
   const reasons: string[] = [];
-  const hanCount = Array.from(text).filter(char => /\p{Script=Han}/u.test(char)).length;
+  const denseLength = text.replace(/\s+/g, '').length;
+  const punctuationCount = Array.from(text.matchAll(/[^\p{L}\p{N}\s]/gu)).length;
+  const lineCount = promptText.split('\n').map(line => line.trim()).filter(Boolean).length;
 
-  if (text.length >= 120) reasons.push('Prompt is long enough to indicate multi-step work.');
-  if (text.includes(' and ')) reasons.push('Prompt contains multiple linked actions.');
-  if ((text.match(/[,:;.!?]/g) ?? []).length >= 2 || (text.match(/[，、；。！？]/g) ?? []).length >= 2) reasons.push('Prompt contains chained actions or constraints.');
-  if (text.includes('harness') || text.includes('production') || text.includes('systematic') || text.includes('automation') || text.includes('end-to-end')) reasons.push('Prompt demands production-level engineering controls.');
-  if (hanCount >= 12) reasons.push('Prompt contains enough dense non-whitespace text to indicate multi-part work.');
-  const keywordHits = COMPLEX_KEYWORDS.filter(keyword => text.includes(keyword)).length;
-  if (keywordHits > 0) reasons.push('Prompt contains engineering-complexity keywords.');
-  if (keywordHits >= 3) reasons.push('Prompt spans multiple engineering control surfaces.');
-  if (hanCount >= 24 && reasons.length >= 2) reasons.push('Prompt is dense enough to justify full harness controls.');
+  if (denseLength >= 120) reasons.push('Prompt is long enough to indicate multi-step work.');
+  if (punctuationCount >= 2) reasons.push('Prompt contains chained actions or constraints.');
+  if (lineCount >= 3) reasons.push('Prompt is structured as a multi-part request.');
+  if (denseLength >= 220 && punctuationCount >= 3) reasons.push('Prompt is dense enough to justify full harness controls.');
 
   let complexity: HarnessComplexity = 'light';
   if (reasons.length >= 3) complexity = 'high';

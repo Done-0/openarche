@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rmdir, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { HarnessBundle } from './harness-system.js';
 import { refreshMaintenanceSpec } from '../maintenance/sweep.js';
@@ -282,4 +282,45 @@ export async function recordHarnessStageCompletion(
       });
   await writeHarnessSession(rootDir, session);
   return session;
+}
+
+export async function cleanupHarnessSessions(rootDir: string): Promise<void> {
+  const artifactDir = join(rootDir, '.openarche');
+  let files: string[] = [];
+  try {
+    files = await readdir(artifactDir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  const now = Date.now();
+  const closed: Array<{ id: string; updatedAt: number }> = [];
+  for (const file of files) {
+    if (!file.endsWith('.session.json')) continue;
+    const id = file.slice(0, -'.session.json'.length);
+    const session = await loadHarnessSession(rootDir, id);
+    if (!session) continue;
+    if (evaluateHarnessCompletion(session).ready) {
+      closed.push({ id, updatedAt: session.updatedAt });
+    }
+  }
+  closed.sort((a, b) => b.updatedAt - a.updatedAt);
+  for (let index = 0; index < closed.length; index++) {
+    const session = closed[index];
+    if (index < 3 && now - session.updatedAt < 24 * 60 * 60 * 1000) continue;
+    for (const suffix of ['plan.json', 'runbook.json', 'validation.json', 'review.json', 'maintenance.json', 'session.json']) {
+      try {
+        await unlink(join(artifactDir, `${session.id}.${suffix}`));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+  }
+  try {
+    if ((await readdir(artifactDir)).length === 0) {
+      await rmdir(artifactDir);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
 }

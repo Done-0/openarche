@@ -5,6 +5,7 @@ OpenArche is a harness-first Claude Code plugin for non-trivial engineering work
 ## Features
 
 - `Task grading`: decides whether a task stays light or enters harness control
+- `Embedding-based routing`: uses the configured embedding backend to separate plain questions from execution work without language-specific keyword lists
 - `Persistent sessions`: materializes `.openarche/` task state when execution work actually starts
 - `Stage gates`: keeps validation, review, and maintenance open until they are actually closed
 - `Context injection`: adds current task state, gate reasons, and relevant local knowledge
